@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/viper"
 )
 
@@ -31,4 +33,8 @@ func initConfig() {
 		fmt.Fprintf(os.Stderr, "Cannot read configuration file: %s\n", err)
 		os.Exit(1)
 	}
+}
+
+func initDB(pgURL string) (*pgxpool.Pool, error) {
+	return pgxpool.New(context.Background(), pgURL)
 }

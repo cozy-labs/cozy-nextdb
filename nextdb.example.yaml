@@ -15,3 +15,7 @@ log:
   # By default, logs are printed on stderr, but by setting this entry to true,
   # it will send logs to the local syslog.
   syslog: false
+
+# pg - Configure the connection to PostgreSQL.
+pg:
+  url: postgres://nextdb:nextdb@localhost:5432/nextdb?pool_max_conns=10
