@@ -1,0 +1,17 @@
+# This file contain an example of cozy-nextdb configuration file.
+
+# server - Configure and which host and port the cozy-nextdb server will listen
+# and accept HTTP requests.
+host: localhost
+port: 7654
+tls:
+  cert: server.pem
+  key: server.key
+
+# log - Configure logging.
+log:
+  # Set the logger level (debug, info, warn, error).
+  level: info
+  # By default, logs are printed on stderr, but by setting this entry to true,
+  # it will send logs to the local syslog.
+  syslog: false

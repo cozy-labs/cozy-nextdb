@@ -1,0 +1,11 @@
+/docs/*.html
+/scripts/golangci-lint
+
+nextdb.yaml
+nextdb.yml
+nextdb.json
+
+*.log
+*.key
+*.crt
+*.pem
