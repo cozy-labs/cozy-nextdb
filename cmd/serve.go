@@ -26,6 +26,12 @@ Use the --port and --host flags to change the listening option.`,
 		}
 		server.DB = db
 
+		logger, err := initLogger()
+		if err != nil {
+			return err
+		}
+		server.Logger = logger
+
 		return server.ListenAndServe()
 	},
 }

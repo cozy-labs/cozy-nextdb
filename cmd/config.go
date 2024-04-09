@@ -3,10 +3,14 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"log/syslog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/lmittmann/tint"
 	"github.com/spf13/viper"
 )
 
@@ -37,4 +41,37 @@ func initConfig() {
 
 func initDB(pgURL string) (*pgxpool.Pool, error) {
 	return pgxpool.New(context.Background(), pgURL)
+}
+
+func initLogger() (*slog.Logger, error) {
+	logLevel := strings.ToLower(viper.GetString("log.level"))
+	var level slog.Level
+	switch logLevel {
+	case "debug":
+		level = slog.LevelDebug
+	case "info":
+		level = slog.LevelInfo
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		return nil, fmt.Errorf("cannot parse log level: %s", logLevel)
+	}
+
+	var handler slog.Handler
+	if viper.GetBool("log.syslog") {
+		w, err := syslog.Dial("", "", syslog.LOG_INFO, "cozy-nextdb")
+		if err != nil {
+			return nil, fmt.Errorf("cannot initialize syslog: %w", err)
+		}
+		opts := &slog.HandlerOptions{Level: level}
+		handler = slog.NewTextHandler(w, opts)
+	} else {
+		handler = tint.NewHandler(os.Stderr, &tint.Options{
+			Level:      level,
+			TimeFormat: time.DateTime,
+		})
+	}
+	return slog.New(handler), nil
 }

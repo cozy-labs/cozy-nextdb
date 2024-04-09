@@ -3,7 +3,9 @@ module github.com/cozy-labs/cozy-nextdb
 go 1.22.0
 
 require (
+	github.com/jackc/pgx/v5 v5.5.6-0.20240407135810-a3d9120636fc
 	github.com/labstack/echo/v4 v4.11.4
+	github.com/lmittmann/tint v1.0.4
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/viper v1.18.2
 )
@@ -16,7 +18,6 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20221227161230-091c0ba34f0a // indirect
-	github.com/jackc/pgx/v5 v5.5.6-0.20240407135810-a3d9120636fc // indirect
 	github.com/jackc/puddle/v2 v2.2.1 // indirect
 	github.com/labstack/gommon v0.4.2 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect

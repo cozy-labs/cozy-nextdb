@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -20,22 +21,27 @@ type Server struct {
 	CertFile string
 	KeyFile  string
 
-	DB *pgxpool.Pool
+	Logger *slog.Logger
+	DB     *pgxpool.Pool
 }
 
 // ListenAndServe creates and setups the necessary http server and start it.
 func (s *Server) ListenAndServe() error {
 	e := Handler(s)
+	log := s.Logger.With(slog.String("nspace", "http"))
 
 	go func() {
 		listenAddr := fmt.Sprintf("%s:%d", s.Host, s.Port)
 		var err error
 		if s.CertFile != "" && s.KeyFile != "" {
+			log.Info(fmt.Sprintf("Start HTTPS server on %d", s.Port))
 			err = e.StartTLS(listenAddr, s.CertFile, s.KeyFile)
 		} else {
+			log.Info(fmt.Sprintf("Start HTTP server on %d", s.Port))
 			err = e.Start(listenAddr)
 		}
 		if err != nil && err != http.ErrServerClosed {
+			log.Error("failed", slog.Any("error", err))
 			os.Exit(1)
 		}
 	}()
@@ -46,6 +52,7 @@ func (s *Server) ListenAndServe() error {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt)
 	<-quit
+	log.Info("Received interrupt signal")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	return e.Shutdown(ctx)
@@ -53,11 +60,37 @@ func (s *Server) ListenAndServe() error {
 
 // Handler returns the echo handler for HTTP requests.
 func Handler(s *Server) *echo.Echo {
+	log := s.Logger.With(slog.String("nspace", "http"))
+
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
 
 	e.Pre(middleware.RemoveTrailingSlash())
+	e.Use(middleware.RecoverWithConfig(middleware.RecoverConfig{
+		LogErrorFunc: func(c echo.Context, err error, stack []byte) error {
+			msg := string(stack)
+			log.Error(msg, slog.Bool("panic", true))
+			return nil
+		},
+	}))
+	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		LogMethod: true,
+		LogURI:    true,
+		LogStatus: true,
+		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
+			log.Info("Request",
+				slog.String("method", v.Method),
+				slog.String("uri", v.URI),
+				slog.Int("status", v.Status),
+			)
+			return nil
+		},
+		Skipper: func(c echo.Context) bool {
+			path := c.Path()
+			return path == "/status"
+		},
+	}))
 
 	e.GET("/status", s.Status)
 	e.HEAD("/status", s.Status)
