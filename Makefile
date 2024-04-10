@@ -25,8 +25,8 @@ build:
 > @go build
 .PHONY: build
 
-## ci: check before commiting, as we don't have a true continuous integration
-ci: install lint unit-tests integration-tests cli doc
+## ci: check before commiting, as we don't have a true CI yet
+ci: install lint test cli
 
 ## serve: start the cozy-nextdb web server for local development
 serve:
@@ -55,10 +55,10 @@ cli: install
 > @cozy-nextdb completion fish > scripts/completion/cozy-nextdb.fish
 .PHONY: cli
 
-## unit-tests: run the unit tests
-unit-tests:
+## test: run the automated tests
+test:
 > @go test -shuffle on -timeout 1m ./...
-.PHONY: unit-tests
+.PHONY: test
 
 ## clean: clean the generated files and directories
 clean:

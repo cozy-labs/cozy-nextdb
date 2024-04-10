@@ -25,6 +25,7 @@ Use the --port and --host flags to change the listening option.`,
 			return err
 		}
 		server.DB = db
+		defer db.Close()
 
 		logger, err := initLogger()
 		if err != nil {

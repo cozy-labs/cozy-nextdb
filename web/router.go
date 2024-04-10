@@ -105,6 +105,9 @@ func (s *Server) Status(c echo.Context) error {
 	status := "OK"
 	code := http.StatusOK
 	if err := s.DB.Ping(c.Request().Context()); err != nil {
+		s.Logger.Warn("Cannot ping DB",
+			slog.String("nspace", "status"),
+			slog.Any("error", err))
 		code = http.StatusInternalServerError
 		status = "KO"
 	}
