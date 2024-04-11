@@ -20,12 +20,12 @@ Use the --port and --host flags to change the listening option.`,
 			KeyFile:  viper.GetString("tls.key"),
 		}
 
-		db, err := initDB(viper.GetString("pg.url"))
+		pg, err := initPG(viper.GetString("pg.url"))
 		if err != nil {
 			return err
 		}
-		server.DB = db
-		defer db.Close()
+		server.PG = pg
+		defer pg.Close()
 
 		logger, err := initLogger()
 		if err != nil {

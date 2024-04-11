@@ -39,7 +39,7 @@ func initConfig() {
 	}
 }
 
-func initDB(pgURL string) (*pgxpool.Pool, error) {
+func initPG(pgURL string) (*pgxpool.Pool, error) {
 	return pgxpool.New(context.Background(), pgURL)
 }
 
