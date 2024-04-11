@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 
@@ -46,6 +47,28 @@ func ParseDatabaseName(databaseName string) (string, string) {
 		return parts[0], parts[1]
 	}
 	return "noprefix", databaseName
+}
+
+func (o *Operator) GetDatabase(databaseName string) (any, error) {
+	var result any
+	table, doctype := ParseDatabaseName(databaseName)
+	err := o.ReadOnlyTx(func(tx pgx.Tx) error {
+		res, err := o.ExecGetDoctype(tx, table, doctype)
+		if err != nil {
+			if pgErr, ok := err.(*pgconn.PgError); ok {
+				if pgErr.Code == pgerrcode.UndefinedTable {
+					return ErrNotFound
+				}
+			}
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		result = res
+		return nil
+	})
+	return result, err
 }
 
 func invalidCharForDatabaseName(r rune) bool {

@@ -77,14 +77,12 @@ func TestCommon(t *testing.T) {
 
 	t.Run("Test the /status endpoint", func(t *testing.T) {
 		e := launchTestServer(t, connectToPG(t, container))
-
 		e.GET("/status").Expect().Status(200).
 			JSON().Object().HasValue("status", "OK")
 	})
 
 	t.Run("Test the PUT /:db endpoint", func(t *testing.T) {
 		e := launchTestServer(t, connectToPG(t, container))
-
 		e.PUT("/açétone").Expect().Status(400).
 			JSON().Object().HasValue("error", "illegal_database_name")
 		e.PUT("/aBCD").Expect().Status(400).
@@ -102,5 +100,22 @@ func TestCommon(t *testing.T) {
 		e.PUT("/{db}").WithPath("db", "prefix/doctype2").
 			Expect().Status(201).
 			JSON().Object().HasValue("ok", true)
+	})
+
+	t.Run("Test the GET/HEAD /:db endpoint", func(t *testing.T) {
+		e := launchTestServer(t, connectToPG(t, container))
+		e.PUT("/{db}").WithPath("db", "cozydb/doctype").
+			Expect().Status(201).
+			JSON().Object().HasValue("ok", true)
+		e.HEAD("/{db}").WithPath("db", "cozydb/doctype").
+			Expect().Status(200)
+		e.GET("/{db}").WithPath("db", "cozydb/doctype").
+			Expect().Status(200).
+			JSON().Object().HasValue("doc_count", 0)
+
+		e.GET("/{db}").WithPath("db", "cozydb/no_such_doctype").
+			Expect().Status(404)
+		e.GET("/{db}").WithPath("db", "no_such_prefix/doctype").
+			Expect().Status(404)
 	})
 }

@@ -44,7 +44,7 @@ func (o *Operator) ExecCreateTable(tx pgx.Tx, tableName string) (pgconn.CommandT
 
 const InsertDoctypeSQL = `
 INSERT INTO %s(doctype, row_id, kind, blob)
-VALUES ($1, $1, 'doctype', '{}'::jsonb);
+VALUES ($1, $1, 'doctype', '{ "doc_count": 0 }'::jsonb);
 `
 
 func (o *Operator) ExecInsertDoctype(tx pgx.Tx, tableName, doctype string) (bool, error) {
@@ -56,6 +56,20 @@ func (o *Operator) ExecInsertDoctype(tx pgx.Tx, tableName, doctype string) (bool
 	return tag.RowsAffected() == 1, nil
 }
 
+const GetDoctypeSQL = `
+SELECT blob
+FROM %s
+WHERE doctype = $1
+AND kind = 'doctype';
+`
+
+func (o *Operator) ExecGetDoctype(tx pgx.Tx, tableName, doctype string) (any, error) {
+	var blob map[string]any
+	sql := fmt.Sprintf(GetDoctypeSQL, tableName)
+	err := tx.QueryRow(o.Ctx, sql, doctype).Scan(&blob)
+	return blob, err
+}
+
 const CheckDoctypeExistsSQL = `
 SELECT COUNT(*)
 FROM %s
@@ -64,8 +78,8 @@ AND kind = 'doctype';
 `
 
 func (o *Operator) ExecCheckDoctypeExists(tx pgx.Tx, tableName, doctype string) (bool, error) {
-	sql := fmt.Sprintf(CheckDoctypeExistsSQL, tableName)
 	var nb int64
+	sql := fmt.Sprintf(CheckDoctypeExistsSQL, tableName)
 	err := tx.QueryRow(o.Ctx, sql, doctype).Scan(&nb)
 	return nb > 0, err
 }

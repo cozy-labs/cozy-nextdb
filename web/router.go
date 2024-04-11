@@ -94,10 +94,12 @@ func Handler(s *Server) *echo.Echo {
 		},
 	}))
 
-	e.PUT("/:db", s.CreateDatabase)
-
 	e.GET("/status", s.Status)
 	e.HEAD("/status", s.Status)
+
+	e.GET("/:db", s.GetDatabase)
+	e.HEAD("/:db", s.GetDatabase)
+	e.PUT("/:db", s.CreateDatabase)
 
 	return e
 }
@@ -107,6 +109,27 @@ func newOperator(s *Server, c echo.Context) *core.Operator {
 		PG:     s.PG,
 		Logger: s.Logger,
 		Ctx:    c.Request().Context(),
+	}
+}
+
+// GetDatabase us the handler for GET/HEAD /:db. It returns information about
+// the given database (number of documents).
+func (s *Server) GetDatabase(c echo.Context) error {
+	op := newOperator(s, c)
+	result, err := op.GetDatabase(c.Param("db"))
+	switch {
+	case err == nil:
+		return c.JSON(http.StatusOK, result)
+	case errors.Is(err, core.ErrNotFound):
+		return c.JSON(http.StatusNotFound, echo.Map{
+			"error":  err.Error(),
+			"reason": "Database does not exist.",
+		})
+	default:
+		return c.JSON(http.StatusInternalServerError, echo.Map{
+			"error":  "internal_server_error",
+			"reason": err.Error(),
+		})
 	}
 }
 
