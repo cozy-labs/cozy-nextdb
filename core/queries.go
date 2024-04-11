@@ -8,20 +8,30 @@ import (
 )
 
 const CreateDocumentKindSQL = `
-CREATE TYPE row_kind AS ENUM (
-  'doctype',
-  'normal_doc',
-  'design_doc',
-  'local_doc',
-  'change'
-);
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'row_kind') THEN
+    CREATE TYPE row_kind AS ENUM (
+      'doctype',
+      'normal_doc',
+      'design_doc',
+      'local_doc',
+      'change'
+    );
+  END IF;
+END
+$$ LANGUAGE plpgsql;
 `
+
+func (o *Operator) ExecCreateDocumentKind(tx pgx.Tx) (pgconn.CommandTag, error) {
+	return tx.Exec(o.Ctx, CreateDocumentKindSQL)
+}
 
 const CreateTableSQL = `
 CREATE TABLE %s (
   doctype VARCHAR(255),
   row_id  VARCHAR(255),
-  kind    VARCHAR(255), -- TODO use row_kind
+  kind    row_kind,
   blob    JSONB,
   PRIMARY KEY (doctype, kind, row_id)
 );

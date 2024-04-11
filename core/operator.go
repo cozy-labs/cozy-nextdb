@@ -93,8 +93,10 @@ func (o *Operator) CreateDatabase(databaseName string) error {
 
 	// Maybe we have to create the table before inserting the doctype
 	return o.ReadWriteTx(func(tx pgx.Tx) error {
-		_, err := o.ExecCreateTable(tx, table)
-		if err != nil {
+		if _, err := o.ExecCreateDocumentKind(tx); err != nil {
+			return err
+		}
+		if _, err = o.ExecCreateTable(tx, table); err != nil {
 			return err
 		}
 		ok, err := o.ExecInsertDoctype(tx, table, doctype)
