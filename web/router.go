@@ -101,6 +101,8 @@ func Handler(s *Server) *echo.Echo {
 	e.HEAD("/:db", s.GetDatabase)
 	e.PUT("/:db", s.CreateDatabase)
 
+	e.POST("/:db", s.CreateDocument)
+
 	return e
 }
 
@@ -121,12 +123,12 @@ func (s *Server) GetDatabase(c echo.Context) error {
 	case err == nil:
 		return c.JSON(http.StatusOK, result)
 	case errors.Is(err, core.ErrNotFound):
-		return c.JSON(http.StatusNotFound, echo.Map{
+		return c.JSON(http.StatusNotFound, map[string]any{
 			"error":  err.Error(),
 			"reason": "Database does not exist.",
 		})
 	default:
-		return c.JSON(http.StatusInternalServerError, echo.Map{
+		return c.JSON(http.StatusInternalServerError, map[string]any{
 			"error":  "internal_server_error",
 			"reason": err.Error(),
 		})
@@ -140,19 +142,54 @@ func (s *Server) CreateDatabase(c echo.Context) error {
 	err := op.CreateDatabase(c.Param("db"))
 	switch {
 	case err == nil:
-		return c.JSON(http.StatusCreated, echo.Map{"ok": true})
+		return c.JSON(http.StatusCreated, map[string]any{"ok": true})
 	case errors.Is(err, core.ErrIllegalDatabaseName):
-		return c.JSON(http.StatusBadRequest, echo.Map{
+		return c.JSON(http.StatusBadRequest, map[string]any{
 			"error":  err.Error(),
 			"reason": "Name: '_db'. Only lowercase characters (a-z), digits (0-9), and any of the characters _, $, (, ), +, -, and / are allowed. Must begin with a letter.",
 		})
 	case errors.Is(err, core.ErrDatabaseExists):
-		return c.JSON(http.StatusPreconditionFailed, echo.Map{
+		return c.JSON(http.StatusPreconditionFailed, map[string]any{
 			"error":  err.Error(),
 			"reason": "The database could not be created, the file already exists.",
 		})
 	default:
-		return c.JSON(http.StatusInternalServerError, echo.Map{
+		return c.JSON(http.StatusInternalServerError, map[string]any{
+			"error":  "internal_server_error",
+			"reason": err.Error(),
+		})
+	}
+}
+
+// CreateDocument is the handler for POST /:db. It creates a document in the
+// given database.
+func (s *Server) CreateDocument(c echo.Context) error {
+	op := newOperator(s, c)
+	doc, err := op.CreateDocument(c.Param("db"), c.Request().Body)
+	switch {
+	case err == nil:
+		return c.JSON(http.StatusCreated, map[string]any{
+			"ok":  true,
+			"id":  doc["_id"],
+			"rev": doc["_rev"],
+		})
+	case errors.Is(err, core.ErrBadRequest):
+		return c.JSON(http.StatusBadRequest, map[string]any{
+			"error":  err.Error(),
+			"reason": "invalid UTF-8 JSON",
+		})
+	case errors.Is(err, core.ErrNotFound):
+		return c.JSON(http.StatusNotFound, map[string]any{
+			"error":  err.Error(),
+			"reason": "Database does not exist.",
+		})
+	case errors.Is(err, core.ErrConflict):
+		return c.JSON(http.StatusConflict, map[string]any{
+			"error":  err.Error(),
+			"reason": "Document update conflict.",
+		})
+	default:
+		return c.JSON(http.StatusInternalServerError, map[string]any{
 			"error":  "internal_server_error",
 			"reason": err.Error(),
 		})
@@ -167,11 +204,11 @@ func (s *Server) Status(c echo.Context) error {
 	err := op.Ping()
 	switch {
 	case err == nil:
-		return c.JSON(http.StatusOK, echo.Map{"status": "OK"})
+		return c.JSON(http.StatusOK, map[string]any{"status": "OK"})
 	default:
 		s.Logger.Warn("Cannot ping PostgreSQL",
 			slog.String("nspace", "status"),
 			slog.String("error", err.Error()))
-		return c.JSON(http.StatusInternalServerError, echo.Map{"status": "KO"})
+		return c.JSON(http.StatusInternalServerError, map[string]any{"status": "KO"})
 	}
 }

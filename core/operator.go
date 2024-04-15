@@ -93,10 +93,11 @@ func (o *Operator) CreateDatabase(databaseName string) error {
 		return ErrIllegalDatabaseName
 	}
 	table, doctype := ParseDatabaseName(databaseName)
+	blob := map[string]any{"doc_count": 0}
 
 	// Happy path: we just insert the doctype
 	err := o.ReadWriteTx(func(tx pgx.Tx) error {
-		ok, err := o.ExecInsertDoctype(tx, table, doctype)
+		ok, err := o.ExecInsertRow(tx, table, doctype, DoctypeKind, doctype, blob)
 		if err != nil {
 			if pgErr, ok := err.(*pgconn.PgError); ok {
 				if pgErr.Code == pgerrcode.UniqueViolation {
@@ -122,7 +123,7 @@ func (o *Operator) CreateDatabase(databaseName string) error {
 		if _, err = o.ExecCreateTable(tx, table); err != nil {
 			return err
 		}
-		ok, err := o.ExecInsertDoctype(tx, table, doctype)
+		ok, err := o.ExecInsertRow(tx, table, doctype, DoctypeKind, doctype, blob)
 		if err != nil {
 			if pgErr, ok := err.(*pgconn.PgError); ok {
 				if pgErr.Code == pgerrcode.UniqueViolation {
