@@ -34,8 +34,9 @@ func TestDoc(t *testing.T) {
 			Expect().Status(201).
 			JSON().Object()
 		obj.HasValue("ok", true)
-		obj.Value("id").String().NotEmpty()
-		obj.Value("rev").String().NotEmpty().HasPrefix("1-")
+		obj.Value("id").String().NotEmpty().Length().IsEqual(32)
+		obj.Value("rev").String().NotEmpty().HasPrefix("1-").
+			Length().IsEqual(34) // 2 bytes for 1- and 32 bytes for the checksum
 
 		obj = e.POST("/{db}").WithPath("db", "cozy1/doctype1").
 			WithHeader("Content-Type", "application/json").
