@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -27,7 +28,7 @@ BEGIN
       '` + string(NormalDocKind) + `',
       '` + string(DesignDocKind) + `',
       '` + string(LocalDocKind) + `',
-	  '` + string(RevisionsKind) + `',
+      '` + string(RevisionsKind) + `',
       '` + string(ChangeKind) + `'
     );
   END IF;
@@ -36,7 +37,8 @@ $$ LANGUAGE plpgsql;
 `
 
 func (o *Operator) ExecCreateDocumentKind(tx pgx.Tx) (pgconn.CommandTag, error) {
-	return tx.Exec(o.Ctx, CreateDocumentKindSQL)
+	sql := strings.ReplaceAll(CreateDocumentKindSQL, "\n", " ") // easier to read in logs
+	return tx.Exec(o.Ctx, sql)
 }
 
 const CreateTableSQL = `
@@ -51,6 +53,7 @@ CREATE TABLE %s (
 
 func (o *Operator) ExecCreateTable(tx pgx.Tx, tableName string) (pgconn.CommandTag, error) {
 	sql := fmt.Sprintf(CreateTableSQL, tableName)
+	sql = strings.ReplaceAll(sql, "\n", " ")
 	return tx.Exec(o.Ctx, sql)
 }
 
@@ -61,6 +64,7 @@ VALUES ($1, $2, '%s', $3);
 
 func (o *Operator) ExecInsertRow(tx pgx.Tx, tableName, doctype string, kind RowKind, id string, blob any) (bool, error) {
 	sql := fmt.Sprintf(InsertRowSQL, tableName, kind)
+	sql = strings.ReplaceAll(sql, "\n", " ")
 	tag, err := tx.Exec(o.Ctx, sql, doctype, id, blob)
 	if err != nil {
 		return false, err
@@ -79,8 +83,45 @@ AND kind = '%s';
 func (o *Operator) ExecGetRow(tx pgx.Tx, tableName, doctype string, kind RowKind, id string) (map[string]any, error) {
 	var blob map[string]any
 	sql := fmt.Sprintf(GetRowSQL, tableName, kind)
+	sql = strings.ReplaceAll(sql, "\n", " ")
 	err := tx.QueryRow(o.Ctx, sql, doctype, id).Scan(&blob)
 	return blob, err
+}
+
+const DeleteRowSQL = `
+DELETE FROM %s
+WHERE doctype = $1
+AND row_id = $2
+AND kind = '%s';
+`
+
+const UpdateRowSQL = `
+UPDATE %s
+SET blob = $1
+WHERE kind = '%s'
+AND doctype = $2
+AND row_id = $3
+AND blob ->> '_rev' = $4;
+`
+
+func (o *Operator) ExecUpdateRow(tx pgx.Tx, tableName, doctype string, kind RowKind, docID, rev string, blob any) (bool, error) {
+	sql := fmt.Sprintf(UpdateRowSQL, tableName, kind)
+	sql = strings.ReplaceAll(sql, "\n", " ")
+	tag, err := tx.Exec(o.Ctx, sql, blob, doctype, docID, rev)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func (o *Operator) ExecDeleteRow(tx pgx.Tx, tableName, doctype string, kind RowKind, id string) (bool, error) {
+	sql := fmt.Sprintf(DeleteRowSQL, tableName, kind)
+	sql = strings.ReplaceAll(sql, "\n", " ")
+	tag, err := tx.Exec(o.Ctx, sql, doctype, id)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 const CheckDoctypeExistsSQL = `
@@ -93,20 +134,32 @@ AND kind = 'doctype';
 func (o *Operator) ExecCheckDoctypeExists(tx pgx.Tx, tableName, doctype string) (bool, error) {
 	var nb int64
 	sql := fmt.Sprintf(CheckDoctypeExistsSQL, tableName)
+	sql = strings.ReplaceAll(sql, "\n", " ")
 	err := tx.QueryRow(o.Ctx, sql, doctype).Scan(&nb)
 	return nb > 0, err
 }
 
 const IncrementDocCountSQL = `
 UPDATE %s
-SET blob = jsonb_set(blob, '{doc_count}', ((blob ->> 'doc_count')::int + 1)::text::jsonb)
+SET blob = jsonb_set(blob, '{doc_count}', ((blob ->> 'doc_count')::int %c 1)::text::jsonb)
 WHERE kind = '` + string(DoctypeKind) + `'
 AND row_id = $1
 AND doctype = $1
 `
 
 func (o *Operator) ExecIncrementDocCount(tx pgx.Tx, tableName, doctype string) (bool, error) {
-	sql := fmt.Sprintf(IncrementDocCountSQL, tableName)
+	sql := fmt.Sprintf(IncrementDocCountSQL, tableName, '+')
+	sql = strings.ReplaceAll(sql, "\n", " ")
+	tag, err := tx.Exec(o.Ctx, sql, doctype)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func (o *Operator) ExecDecrementDocCount(tx pgx.Tx, tableName, doctype string) (bool, error) {
+	sql := fmt.Sprintf(IncrementDocCountSQL, tableName, '-')
+	sql = strings.ReplaceAll(sql, "\n", " ")
 	tag, err := tx.Exec(o.Ctx, sql, doctype)
 	if err != nil {
 		return false, err

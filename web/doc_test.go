@@ -55,7 +55,7 @@ func TestDoc(t *testing.T) {
 			JSON().Object().HasValue("doc_count", 2)
 	})
 
-	t.Run("Test the GET /:db endpoint", func(t *testing.T) {
+	t.Run("Test the GET /:db/:docid endpoint", func(t *testing.T) {
 		e := launchTestServer(t, logger, connectToPG(t, container, logger))
 		e.PUT("/{db}").WithPath("db", "cozy2%2Fdoctype1").
 			Expect().Status(201).
@@ -89,5 +89,39 @@ func TestDoc(t *testing.T) {
 		revs := obj.Value("_revisions").Object()
 		revs.HasValue("start", 1)
 		revs.HasValue("ids", []string{strings.TrimPrefix(rev, "1-")})
+	})
+
+	t.Run("Test the DELETE /:db/:docid endpoint", func(t *testing.T) {
+		e := launchTestServer(t, logger, connectToPG(t, container, logger))
+		e.PUT("/{db}").WithPath("db", "cozy3%2Fdoctype1").
+			Expect().Status(201).
+			JSON().Object().HasValue("ok", true)
+		obj := e.POST("/{db}").WithPath("db", "cozy3%2Fdoctype1").
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(`{"foo": "bar"}`)).
+			Expect().Status(201).
+			JSON().Object()
+		obj.HasValue("ok", true)
+		id := obj.Value("id").String().Raw()
+		rev := obj.Value("rev").String().Raw()
+
+		e.DELETE("/{db}/"+id).WithPath("db", "cozy3%2Fdoctype1").
+			WithQuery("rev", "1-bad").
+			Expect().Status(409).
+			JSON().Object()
+
+		obj = e.DELETE("/{db}/"+id).WithPath("db", "cozy3%2Fdoctype1").
+			WithQuery("rev", rev).
+			Expect().Status(200).
+			JSON().Object()
+		obj.HasValue("ok", true)
+		obj.HasValue("id", id)
+		obj.Value("rev").String().NotEmpty().NotEqual(rev).HasPrefix("2-")
+
+		e.HEAD("/{db}/"+id).WithPath("db", "cozy3%2Fdoctype1").
+			Expect().Status(404)
+		e.GET("/{db}").WithPath("db", "cozy3%2Fdoctype1").
+			Expect().Status(200).
+			JSON().Object().HasValue("doc_count", 0)
 	})
 }

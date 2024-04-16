@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/gofrs/uuid/v5"
@@ -25,6 +26,15 @@ func ShortUUID() string {
 func ComputeRevisionSum(body []byte) string {
 	sum := sha256.Sum256(body)
 	return fmt.Sprintf("%x", sum[0:16])
+}
+
+func ExtractGeneration(rev string) int {
+	parts := strings.SplitN(rev, "-", 2)
+	gen, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return -1
+	}
+	return gen
 }
 
 type RevsStruct struct {
@@ -131,6 +141,9 @@ func (o *Operator) GetDocument(databaseName, docID string, withRevisions bool) (
 			}
 			return err
 		}
+		if deleted, _ := res["_deleted"].(bool); deleted {
+			return ErrDeleted
+		}
 		result = res
 
 		if withRevisions {
@@ -144,4 +157,69 @@ func (o *Operator) GetDocument(databaseName, docID string, withRevisions bool) (
 		return nil
 	})
 	return result, err
+}
+
+func (o *Operator) DeleteDocument(databaseName, docID, rev string) (string, error) {
+	table, doctype, err := ParseDatabaseName(databaseName)
+	if err != nil {
+		return "", err
+	}
+	gen := ExtractGeneration(rev)
+	if gen <= 0 {
+		return "", ErrConflict
+	}
+
+	doc := map[string]any{"_id": docID, "_rev": rev, "_deleted": true}
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return "", err
+	}
+	revSum := ComputeRevisionSum(body)
+	newRev := fmt.Sprintf("%d-%s", gen+1, revSum)
+	doc["_rev"] = newRev
+
+	err = o.ReadWriteTx(func(tx pgx.Tx) error {
+		ok, err := o.ExecDecrementDocCount(tx, table, doctype)
+		if err != nil {
+			if pgErr, ok := err.(*pgconn.PgError); ok {
+				if pgErr.Code == pgerrcode.UndefinedTable {
+					return ErrNotFound
+				}
+			}
+			return err
+		}
+		if !ok {
+			return ErrNotFound
+		}
+
+		ok, err = o.ExecUpdateRow(tx, table, doctype, NormalDocKind, docID, rev, doc)
+		if err != nil {
+			if pgErr, ok := err.(*pgconn.PgError); ok {
+				if pgErr.Code == pgerrcode.UndefinedTable {
+					return ErrNotFound
+				}
+			}
+			return err
+		}
+		if !ok {
+			_, err := o.ExecGetRow(tx, table, doctype, NormalDocKind, docID)
+			if err != nil {
+				return ErrNotFound
+			}
+			return ErrConflict
+		}
+
+		ok, err = o.ExecDeleteRow(tx, table, doctype, RevisionsKind, docID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return ErrInternalServerError
+		}
+
+		// TODO changes feed
+
+		return nil
+	})
+	return newRev, err
 }

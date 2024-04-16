@@ -104,6 +104,7 @@ func Handler(s *Server) *echo.Echo {
 	e.POST("/:db", s.CreateDocument)
 	e.GET("/:db/:docid", s.GetDocument)
 	e.HEAD("/:db/:docid", s.GetDocument)
+	e.DELETE("/:db/:docid", s.DeleteDocument)
 
 	return e
 }
@@ -116,7 +117,7 @@ func newOperator(s *Server, c echo.Context) *core.Operator {
 	}
 }
 
-// GetDatabase us the handler for GET/HEAD /:db. It returns information about
+// GetDatabase is the handler for GET/HEAD /:db. It returns information about
 // the given database (number of documents).
 func (s *Server) GetDatabase(c echo.Context) error {
 	op := newOperator(s, c)
@@ -198,7 +199,7 @@ func (s *Server) CreateDocument(c echo.Context) error {
 	}
 }
 
-// GetDocument us the handler for GET/HEAD /:db/:docid. It returns the given
+// GetDocument is the handler for GET/HEAD /:db/:docid. It returns the given
 // document.
 func (s *Server) GetDocument(c echo.Context) error {
 	op := newOperator(s, c)
@@ -213,6 +214,47 @@ func (s *Server) GetDocument(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]any{
 			"error":  err.Error(),
 			"reason": "missing",
+		})
+	case errors.Is(err, core.ErrDeleted):
+		return c.JSON(http.StatusNotFound, map[string]any{
+			"error":  "not_found",
+			"reason": "deleted",
+		})
+	default:
+		return c.JSON(http.StatusInternalServerError, map[string]any{
+			"error":  "internal_server_error",
+			"reason": err.Error(),
+		})
+	}
+}
+
+// DeleteDocument is the handler for DELETE /:db/:docid. It marks the given
+// document as deleted.
+func (s *Server) DeleteDocument(c echo.Context) error {
+	op := newOperator(s, c)
+	docID := c.Param("docid")
+	rev := c.QueryParam("rev")
+	if rev == "" {
+		rev = c.Request().Header.Get("If-Match")
+	}
+	rev, err := op.DeleteDocument(c.Param("db"), docID, rev)
+	switch {
+	case err == nil:
+		c.Response().Header().Set("ETag", rev)
+		return c.JSON(http.StatusOK, map[string]any{
+			"ok":  true,
+			"id":  docID,
+			"rev": rev,
+		})
+	case errors.Is(err, core.ErrNotFound):
+		return c.JSON(http.StatusNotFound, map[string]any{
+			"error":  err.Error(),
+			"reason": "missing",
+		})
+	case errors.Is(err, core.ErrConflict):
+		return c.JSON(http.StatusConflict, map[string]any{
+			"error":  err.Error(),
+			"reason": "Document update conflict.",
 		})
 	default:
 		return c.JSON(http.StatusInternalServerError, map[string]any{
