@@ -8,9 +8,10 @@ import (
 func TestDoc(t *testing.T) {
 	t.Parallel()
 	container := preparePG(t)
+	logger := setupLogger(t)
 
 	t.Run("Test the POST /:db endpoint", func(t *testing.T) {
-		e := launchTestServer(t, connectToPG(t, container))
+		e := launchTestServer(t, logger, connectToPG(t, container, logger))
 		e.PUT("/{db}").WithPath("db", "cozy1%2Fdoctype1").
 			Expect().Status(201).
 			JSON().Object().HasValue("ok", true)
@@ -55,7 +56,7 @@ func TestDoc(t *testing.T) {
 	})
 
 	t.Run("Test the GET /:db endpoint", func(t *testing.T) {
-		e := launchTestServer(t, connectToPG(t, container))
+		e := launchTestServer(t, logger, connectToPG(t, container, logger))
 		e.PUT("/{db}").WithPath("db", "cozy2%2Fdoctype1").
 			Expect().Status(201).
 			JSON().Object().HasValue("ok", true)

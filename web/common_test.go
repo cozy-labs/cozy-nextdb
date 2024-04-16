@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cozy-labs/cozy-nextdb/core"
 	"github.com/gavv/httpexpect/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/tracelog"
 	"github.com/lmittmann/tint"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -41,13 +43,33 @@ func preparePG(t *testing.T) *postgres.PostgresContainer {
 	return container
 }
 
-func connectToPG(t *testing.T, container *postgres.PostgresContainer) *pgxpool.Pool {
+func setupLogger(t *testing.T) *slog.Logger {
+	t.Helper()
+
+	opts := &tint.Options{
+		Level:      slog.LevelInfo,
+		TimeFormat: time.TimeOnly,
+	}
+	if os.Getenv("TEST_NEXTDB_LOG_LEVEL") == "debug" {
+		opts.Level = slog.LevelDebug
+	}
+
+	return slog.New(tint.NewHandler(os.Stderr, opts))
+}
+
+func connectToPG(t *testing.T, container *postgres.PostgresContainer, logger *slog.Logger) *pgxpool.Pool {
 	t.Helper()
 
 	ctx := context.Background()
 	pgURL, err := container.ConnectionString(ctx)
 	require.NoError(t, err, "Cannot get connection string for PostgreSQL container")
-	pg, err := pgxpool.New(ctx, pgURL)
+	config, err := pgxpool.ParseConfig(pgURL)
+	require.NoError(t, err, "Cannot parse config for pgxpool")
+	config.ConnConfig.Tracer = &tracelog.TraceLog{
+		Logger:   core.NewPgxLogger(logger),
+		LogLevel: tracelog.LogLevelInfo,
+	}
+	pg, err := pgxpool.NewWithConfig(ctx, config)
 	require.NoError(t, err, "Cannot create a pgxpool")
 	t.Cleanup(func() {
 		pg.Close()
@@ -57,13 +79,9 @@ func connectToPG(t *testing.T, container *postgres.PostgresContainer) *pgxpool.P
 	return pg
 }
 
-func launchTestServer(t *testing.T, pg *pgxpool.Pool) *httpexpect.Expect {
+func launchTestServer(t *testing.T, logger *slog.Logger, pg *pgxpool.Pool) *httpexpect.Expect {
 	t.Helper()
 
-	logger := slog.New(tint.NewHandler(os.Stderr, &tint.Options{
-		Level:      slog.LevelInfo,
-		TimeFormat: time.TimeOnly,
-	}))
 	handler := Handler(&Server{Logger: logger, PG: pg})
 	ts := httptest.NewServer(handler)
 	t.Cleanup(func() {
@@ -82,15 +100,16 @@ func launchTestServer(t *testing.T, pg *pgxpool.Pool) *httpexpect.Expect {
 func TestCommon(t *testing.T) {
 	t.Parallel()
 	container := preparePG(t)
+	logger := setupLogger(t)
 
 	t.Run("Test the /status endpoint", func(t *testing.T) {
-		e := launchTestServer(t, connectToPG(t, container))
+		e := launchTestServer(t, logger, connectToPG(t, container, logger))
 		e.GET("/status").Expect().Status(200).
 			JSON().Object().HasValue("status", "OK")
 	})
 
 	t.Run("Test the PUT /:db endpoint", func(t *testing.T) {
-		e := launchTestServer(t, connectToPG(t, container))
+		e := launchTestServer(t, logger, connectToPG(t, container, logger))
 		e.PUT("/açétone").Expect().Status(400).
 			JSON().Object().HasValue("error", "illegal_database_name")
 		e.PUT("/aBCD").Expect().Status(400).
@@ -111,7 +130,7 @@ func TestCommon(t *testing.T) {
 	})
 
 	t.Run("Test the GET/HEAD /:db endpoint", func(t *testing.T) {
-		e := launchTestServer(t, connectToPG(t, container))
+		e := launchTestServer(t, logger, connectToPG(t, container, logger))
 		e.PUT("/{db}").WithPath("db", "cozydb%2Fdoctype").
 			Expect().Status(201).
 			JSON().Object().HasValue("ok", true)
