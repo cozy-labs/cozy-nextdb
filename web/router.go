@@ -202,7 +202,8 @@ func (s *Server) CreateDocument(c echo.Context) error {
 // document.
 func (s *Server) GetDocument(c echo.Context) error {
 	op := newOperator(s, c)
-	result, err := op.GetDocument(c.Param("db"), c.Param("docid"))
+	withRevisions := c.QueryParam("revs") == "true"
+	result, err := op.GetDocument(c.Param("db"), c.Param("docid"), withRevisions)
 	switch {
 	case err == nil:
 		rev, _ := result["_rev"].(string)

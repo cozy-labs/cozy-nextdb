@@ -22,9 +22,14 @@ func ShortUUID() string {
 	return strings.ReplaceAll(uuidv7.String(), "-", "")
 }
 
-func ComputeRevision(gen int, body []byte) string {
+func ComputeRevisionSum(body []byte) string {
 	sum := sha256.Sum256(body)
-	return fmt.Sprintf("%d-%x", gen, sum[0:16])
+	return fmt.Sprintf("%x", sum[0:16])
+}
+
+type RevsStruct struct {
+	Start int      `json:"start"`
+	IDs   []string `json:"ids"`
 }
 
 func (o *Operator) CreateDocument(databaseName string, r io.Reader) (map[string]any, error) {
@@ -51,8 +56,8 @@ func (o *Operator) CreateDocument(databaseName string, r io.Reader) (map[string]
 	if _, ok := doc["_rev"]; ok {
 		return nil, ErrConflict
 	}
-	rev := ComputeRevision(1, body)
-	doc["_rev"] = rev
+	revSum := ComputeRevisionSum(body)
+	doc["_rev"] = "1-" + revSum
 
 	err = o.ReadWriteTx(func(tx pgx.Tx) error {
 		ok, err := o.ExecIncrementDocCount(tx, table, doctype)
@@ -81,7 +86,10 @@ func (o *Operator) CreateDocument(databaseName string, r io.Reader) (map[string]
 			return ErrInternalServerError
 		}
 
-		blob := []string{rev}
+		blob := RevsStruct{
+			Start: 1,
+			IDs:   []string{revSum},
+		}
 		ok, err = o.ExecInsertRow(tx, table, doctype, RevisionsKind, id, blob)
 		if err != nil {
 			if pgErr, ok := err.(*pgconn.PgError); ok {
@@ -103,7 +111,7 @@ func (o *Operator) CreateDocument(databaseName string, r io.Reader) (map[string]
 	return doc, err
 }
 
-func (o *Operator) GetDocument(databaseName, docID string) (map[string]any, error) {
+func (o *Operator) GetDocument(databaseName, docID string, withRevisions bool) (map[string]any, error) {
 	table, doctype, err := ParseDatabaseName(databaseName)
 	if err != nil {
 		return nil, err
@@ -124,6 +132,15 @@ func (o *Operator) GetDocument(databaseName, docID string) (map[string]any, erro
 			return err
 		}
 		result = res
+
+		if withRevisions {
+			revisions, err := o.ExecGetRow(tx, table, doctype, RevisionsKind, docID)
+			if err != nil {
+				return err
+			}
+			result["_revisions"] = revisions
+		}
+
 		return nil
 	})
 	return result, err

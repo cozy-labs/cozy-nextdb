@@ -1,6 +1,9 @@
 package web
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDoc(t *testing.T) {
 	t.Parallel()
@@ -74,5 +77,16 @@ func TestDoc(t *testing.T) {
 		obj.HasValue("_id", id)
 		obj.HasValue("_rev", rev)
 		obj.HasValue("foo", "bar")
+
+		obj = e.GET("/{db}/"+id).WithPath("db", "cozy2%2Fdoctype1").
+			WithQuery("revs", "true").
+			Expect().Status(200).
+			JSON().Object()
+		obj.HasValue("_id", id)
+		obj.HasValue("_rev", rev)
+		obj.HasValue("foo", "bar")
+		revs := obj.Value("_revisions").Object()
+		revs.HasValue("start", 1)
+		revs.HasValue("ids", []string{strings.TrimPrefix(rev, "1-")})
 	})
 }
