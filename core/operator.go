@@ -3,7 +3,9 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 
 	"github.com/jackc/pgerrcode"
@@ -42,18 +44,25 @@ func beginTx(o *Operator, accessMode pgx.TxAccessMode, fn func(pgx.Tx) error) er
 
 // ParseDatabaseName takes a database name (as in the CouchDB API), and returns
 // the SQL table name and doctype for it.
-func ParseDatabaseName(databaseName string) (string, string) {
-	if parts := strings.SplitN(databaseName, "/", 2); len(parts) == 2 {
-		return parts[0], parts[1]
+func ParseDatabaseName(databaseName string) (string, string, error) {
+	unescaped, err := url.PathUnescape(databaseName)
+	if err != nil {
+		return "", "", ErrIllegalDatabaseName
 	}
-	return "noprefix", databaseName
+	if parts := strings.SplitN(unescaped, "/", 2); len(parts) == 2 {
+		return parts[0], parts[1], nil
+	}
+	return "noprefix", databaseName, nil
 }
 
 func (o *Operator) GetDatabase(databaseName string) (any, error) {
 	var result any
-	table, doctype := ParseDatabaseName(databaseName)
-	err := o.ReadOnlyTx(func(tx pgx.Tx) error {
-		res, err := o.ExecGetDoctype(tx, table, doctype)
+	table, doctype, err := ParseDatabaseName(databaseName)
+	if err != nil {
+		return nil, err
+	}
+	err = o.ReadOnlyTx(func(tx pgx.Tx) error {
+		res, err := o.ExecGetRow(tx, table, doctype, DoctypeKind, doctype)
 		if err != nil {
 			if pgErr, ok := err.(*pgconn.PgError); ok {
 				if pgErr.Code == pgerrcode.UndefinedTable {
@@ -86,17 +95,21 @@ func invalidCharForDatabaseName(r rune) bool {
 }
 
 func (o *Operator) CreateDatabase(databaseName string) error {
-	if len(databaseName) == 0 || strings.ContainsFunc(databaseName, invalidCharForDatabaseName) {
+	table, doctype, err := ParseDatabaseName(databaseName)
+	if err != nil {
+		return err
+	}
+	unescaped := fmt.Sprintf("%s/%s", table, doctype)
+	if len(unescaped) == 0 || strings.ContainsFunc(unescaped, invalidCharForDatabaseName) {
 		return ErrIllegalDatabaseName
 	}
 	if first := databaseName[0]; first < 'a' || first > 'z' {
 		return ErrIllegalDatabaseName
 	}
-	table, doctype := ParseDatabaseName(databaseName)
 	blob := map[string]any{"doc_count": 0}
 
 	// Happy path: we just insert the doctype
-	err := o.ReadWriteTx(func(tx pgx.Tx) error {
+	err = o.ReadWriteTx(func(tx pgx.Tx) error {
 		ok, err := o.ExecInsertRow(tx, table, doctype, DoctypeKind, doctype, blob)
 		if err != nil {
 			if pgErr, ok := err.(*pgconn.PgError); ok {

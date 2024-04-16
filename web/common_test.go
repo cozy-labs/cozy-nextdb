@@ -3,8 +3,10 @@ package web
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,7 +70,13 @@ func launchTestServer(t *testing.T, pg *pgxpool.Pool) *httpexpect.Expect {
 		ts.Close()
 	})
 
-	return httpexpect.Default(t, ts.URL)
+	return httpexpect.Default(t, ts.URL).Builder(func(req *httpexpect.Request) {
+		req.WithTransformer(func(r *http.Request) {
+			// https://github.com/golang/go/commit/874a605af0764a8f340c3de65406963f514e21bc
+			r.URL.RawPath = r.URL.Path
+			r.URL.Path = strings.ReplaceAll(r.URL.Path, "%2F", "/")
+		})
+	})
 }
 
 func TestCommon(t *testing.T) {
@@ -94,28 +102,28 @@ func TestCommon(t *testing.T) {
 			JSON().Object().HasValue("ok", true)
 		e.PUT("/twice").Expect().Status(412).
 			JSON().Object().HasValue("error", "file_exists")
-		e.PUT("/{db}").WithPath("db", "prefix/doctype1").
+		e.PUT("/{db}").WithPath("db", "prefix%2Fdoctype1").
 			Expect().Status(201).
 			JSON().Object().HasValue("ok", true)
-		e.PUT("/{db}").WithPath("db", "prefix/doctype2").
+		e.PUT("/{db}").WithPath("db", "prefix%2Fdoctype2").
 			Expect().Status(201).
 			JSON().Object().HasValue("ok", true)
 	})
 
 	t.Run("Test the GET/HEAD /:db endpoint", func(t *testing.T) {
 		e := launchTestServer(t, connectToPG(t, container))
-		e.PUT("/{db}").WithPath("db", "cozydb/doctype").
+		e.PUT("/{db}").WithPath("db", "cozydb%2Fdoctype").
 			Expect().Status(201).
 			JSON().Object().HasValue("ok", true)
-		e.HEAD("/{db}").WithPath("db", "cozydb/doctype").
+		e.HEAD("/{db}").WithPath("db", "cozydb%2Fdoctype").
 			Expect().Status(200)
-		e.GET("/{db}").WithPath("db", "cozydb/doctype").
+		e.GET("/{db}").WithPath("db", "cozydb%2Fdoctype").
 			Expect().Status(200).
 			JSON().Object().HasValue("doc_count", 0)
 
-		e.GET("/{db}").WithPath("db", "cozydb/no_such_doctype").
+		e.GET("/{db}").WithPath("db", "cozydb%2Fno_such_doctype").
 			Expect().Status(404)
-		e.GET("/{db}").WithPath("db", "no_such_prefix/doctype").
+		e.GET("/{db}").WithPath("db", "no_such_prefix%2Fdoctype").
 			Expect().Status(404)
 	})
 }

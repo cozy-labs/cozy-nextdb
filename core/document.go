@@ -3,6 +3,7 @@ package core
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -27,6 +28,11 @@ func ComputeRevision(gen int, body []byte) string {
 }
 
 func (o *Operator) CreateDocument(databaseName string, r io.Reader) (map[string]any, error) {
+	table, doctype, err := ParseDatabaseName(databaseName)
+	if err != nil {
+		return nil, err
+	}
+
 	body, err := io.ReadAll(r)
 	if err != nil {
 		return nil, err
@@ -47,8 +53,6 @@ func (o *Operator) CreateDocument(databaseName string, r io.Reader) (map[string]
 	}
 	rev := ComputeRevision(1, body)
 	doc["_rev"] = rev
-
-	table, doctype := ParseDatabaseName(databaseName)
 
 	err = o.ReadWriteTx(func(tx pgx.Tx) error {
 		ok, err := o.ExecIncrementDocCount(tx, table, doctype)
@@ -78,7 +82,7 @@ func (o *Operator) CreateDocument(databaseName string, r io.Reader) (map[string]
 		}
 
 		blob := []string{rev}
-		ok, err = o.ExecInsertRow(tx, table, doctype, RevsListKind, id, blob)
+		ok, err = o.ExecInsertRow(tx, table, doctype, RevisionsKind, id, blob)
 		if err != nil {
 			if pgErr, ok := err.(*pgconn.PgError); ok {
 				if pgErr.Code == pgerrcode.UniqueViolation {
@@ -97,4 +101,30 @@ func (o *Operator) CreateDocument(databaseName string, r io.Reader) (map[string]
 	})
 
 	return doc, err
+}
+
+func (o *Operator) GetDocument(databaseName, docID string) (map[string]any, error) {
+	table, doctype, err := ParseDatabaseName(databaseName)
+	if err != nil {
+		return nil, err
+	}
+
+	var result map[string]any
+	err = o.ReadOnlyTx(func(tx pgx.Tx) error {
+		res, err := o.ExecGetRow(tx, table, doctype, NormalDocKind, docID)
+		if err != nil {
+			if pgErr, ok := err.(*pgconn.PgError); ok {
+				if pgErr.Code == pgerrcode.UndefinedTable {
+					return ErrNotFound
+				}
+			}
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		result = res
+		return nil
+	})
+	return result, err
 }

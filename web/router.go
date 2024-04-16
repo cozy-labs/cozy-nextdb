@@ -102,6 +102,8 @@ func Handler(s *Server) *echo.Echo {
 	e.PUT("/:db", s.CreateDatabase)
 
 	e.POST("/:db", s.CreateDocument)
+	e.GET("/:db/:docid", s.GetDocument)
+	e.HEAD("/:db/:docid", s.GetDocument)
 
 	return e
 }
@@ -187,6 +189,29 @@ func (s *Server) CreateDocument(c echo.Context) error {
 		return c.JSON(http.StatusConflict, map[string]any{
 			"error":  err.Error(),
 			"reason": "Document update conflict.",
+		})
+	default:
+		return c.JSON(http.StatusInternalServerError, map[string]any{
+			"error":  "internal_server_error",
+			"reason": err.Error(),
+		})
+	}
+}
+
+// GetDocument us the handler for GET/HEAD /:db/:docid. It returns the given
+// document.
+func (s *Server) GetDocument(c echo.Context) error {
+	op := newOperator(s, c)
+	result, err := op.GetDocument(c.Param("db"), c.Param("docid"))
+	switch {
+	case err == nil:
+		rev, _ := result["_rev"].(string)
+		c.Response().Header().Set("ETag", rev)
+		return c.JSON(http.StatusOK, result)
+	case errors.Is(err, core.ErrNotFound):
+		return c.JSON(http.StatusNotFound, map[string]any{
+			"error":  err.Error(),
+			"reason": "missing",
 		})
 	default:
 		return c.JSON(http.StatusInternalServerError, map[string]any{

@@ -14,7 +14,7 @@ const (
 	NormalDocKind RowKind = "normal_doc"
 	DesignDocKind RowKind = "design_doc"
 	LocalDocKind  RowKind = "local_doc"
-	RevsListKind  RowKind = "revs_list"
+	RevisionsKind RowKind = "revisions"
 	ChangeKind    RowKind = "change"
 )
 
@@ -27,7 +27,7 @@ BEGIN
       '` + string(NormalDocKind) + `',
       '` + string(DesignDocKind) + `',
       '` + string(LocalDocKind) + `',
-	  '` + string(RevsListKind) + `',
+	  '` + string(RevisionsKind) + `',
       '` + string(ChangeKind) + `'
     );
   END IF;
@@ -68,17 +68,18 @@ func (o *Operator) ExecInsertRow(tx pgx.Tx, tableName, doctype string, kind RowK
 	return tag.RowsAffected() == 1, nil
 }
 
-const GetDoctypeSQL = `
+const GetRowSQL = `
 SELECT blob
 FROM %s
 WHERE doctype = $1
-AND kind = 'doctype';
+AND row_id = $2
+AND kind = '%s';
 `
 
-func (o *Operator) ExecGetDoctype(tx pgx.Tx, tableName, doctype string) (any, error) {
+func (o *Operator) ExecGetRow(tx pgx.Tx, tableName, doctype string, kind RowKind, id string) (map[string]any, error) {
 	var blob map[string]any
-	sql := fmt.Sprintf(GetDoctypeSQL, tableName)
-	err := tx.QueryRow(o.Ctx, sql, doctype).Scan(&blob)
+	sql := fmt.Sprintf(GetRowSQL, tableName, kind)
+	err := tx.QueryRow(o.Ctx, sql, doctype, id).Scan(&blob)
 	return blob, err
 }
 
