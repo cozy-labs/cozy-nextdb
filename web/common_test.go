@@ -25,7 +25,11 @@ func preparePG(t *testing.T) *postgres.PostgresContainer {
 	t.Helper()
 
 	ctx := context.Background()
-	image := testcontainers.WithImage("docker.io/postgres:16-alpine")
+	pg_image := os.Getenv("TEST_NEXTDB_PG_IMAGE")
+	if pg_image == "" {
+		pg_image = "docker.io/postgres:16-alpine"
+	}
+	image := testcontainers.WithImage(pg_image)
 	ready := testcontainers.WithWaitStrategy(
 		wait.ForLog("database system is ready to accept connections").
 			WithOccurrence(2).
@@ -33,7 +37,6 @@ func preparePG(t *testing.T) *postgres.PostgresContainer {
 	container, err := postgres.RunContainer(ctx, image, ready)
 	require.NoError(t, err, "Cannot run the postgres container")
 
-	// TODO Run migrations on the database
 	err = container.Snapshot(ctx, postgres.WithSnapshotName("test-snapshot"))
 	require.NoError(t, err, "Cannot create a postgres snapshot")
 	t.Cleanup(func() {
