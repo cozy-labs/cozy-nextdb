@@ -244,4 +244,62 @@ func TestDoc(t *testing.T) {
 			Expect().Status(200).
 			JSON().Object().HasValue("doc_count", 0)
 	})
+
+	t.Run("Test the GET /:db/_all_docs endpoint", func(t *testing.T) {
+		e := launchTestServer(t, logger, connectToPG(t, container, logger))
+		e.PUT("/{db}").WithPath("db", "cozy5%2Fdoctype1").
+			Expect().Status(201).
+			JSON().Object().HasValue("ok", true)
+		e.POST("/{db}").WithPath("db", "cozy5%2Fdoctype1").
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(`{"_id": "foo", "value": "foo"}`)).
+			Expect().Status(201)
+		e.POST("/{db}").WithPath("db", "cozy5%2Fdoctype1").
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(`{"_id": "bar", "value": "bar"}`)).
+			Expect().Status(201)
+		e.POST("/{db}").WithPath("db", "cozy5%2Fdoctype1").
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(`{"_id": "baz", "value": "baz"}`)).
+			Expect().Status(201)
+
+		// Check errors
+		e.HEAD("/{db}/_all_docs").WithPath("db", "cozy0%2Fdoctype1").
+			Expect().Status(404)
+		e.HEAD("/{db}/_all_docs").WithPath("db", "cozy5%2Fdoctype2").
+			Expect().Status(404)
+
+		// Test without include_docs
+		obj := e.GET("/{db}/_all_docs").WithPath("db", "cozy5%2Fdoctype1").
+			Expect().Status(200).
+			JSON().Object()
+		obj.HasValue("total_rows", 3)
+		obj.HasValue("offset", 0)
+		rows := obj.Value("rows").Array()
+		rows.Length().IsEqual(3)
+		for i, key := range []string{"bar", "baz", "foo"} {
+			row := rows.Value(i).Object()
+			row.HasValue("id", key)
+			row.HasValue("key", key)
+			row.Value("value").Object().Value("rev").String().NotEmpty()
+			row.NotContainsKey("doc")
+		}
+
+		// Test with include_docs
+		obj = e.GET("/{db}/_all_docs").WithPath("db", "cozy5%2Fdoctype1").
+			WithQuery("include_docs", "true").
+			Expect().Status(200).
+			JSON().Object()
+		obj.HasValue("total_rows", 3)
+		obj.HasValue("offset", 0)
+		rows = obj.Value("rows").Array()
+		rows.Length().IsEqual(3)
+		for i, key := range []string{"bar", "baz", "foo"} {
+			row := rows.Value(i).Object()
+			row.HasValue("id", key)
+			row.HasValue("key", key)
+			row.Value("value").Object().Value("rev").String().NotEmpty()
+			row.Value("doc").Object().HasValue("value", key)
+		}
+	})
 }

@@ -421,3 +421,81 @@ func (o *Operator) doDeleteDocument(table, doctype, docID, currentRev string) (m
 	})
 	return doc, err
 }
+
+type AllDocsParams struct {
+	IncludeDocs bool
+}
+
+type AllDocsResponse struct {
+	Offset    int          `json:"offset"`
+	TotalRows int          `json:"total_rows"`
+	Rows      []AllDocsRow `json:"rows"`
+}
+type AllDocsRow struct {
+	ID    string         `json:"id"`
+	Key   string         `json:"key"`
+	Value AllDocsValue   `json:"value"`
+	Doc   map[string]any `json:"doc,omitempty"`
+}
+type AllDocsValue struct {
+	Rev string `json:"rev"`
+}
+
+type JustDocCount struct {
+	DocCount int `json:"doc_count"`
+}
+
+func (o *Operator) GetAllDocs(databaseName string, params AllDocsParams) (*AllDocsResponse, error) {
+	table, doctype, err := ParseDatabaseName(databaseName)
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AllDocsResponse{}
+	err = o.ReadOnlyTx(func(tx pgx.Tx) error {
+		var db JustDocCount
+		err = o.ExecGetRow(tx, table, doctype, DoctypeKind, doctype, &db)
+		if err != nil {
+			if pgErr, ok := err.(*pgconn.PgError); ok {
+				if pgErr.Code == pgerrcode.UndefinedTable {
+					return ErrNotFound
+				}
+			}
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		response.TotalRows = db.DocCount
+		if db.DocCount == 0 {
+			return nil
+		}
+
+		// TODO we should also include design docs
+		var docs []map[string]any
+		if params.IncludeDocs {
+			docs, err = o.ExecGetDocuments(tx, table, doctype)
+		} else {
+			docs, err = o.ExecGetIDRevs(tx, table, doctype)
+		}
+		if err != nil {
+			return err
+		}
+		for _, doc := range docs {
+			id, _ := doc["_id"].(string)
+			rev, _ := doc["_rev"].(string)
+			row := AllDocsRow{
+				ID:    id,
+				Key:   id,
+				Value: AllDocsValue{Rev: rev},
+			}
+			if params.IncludeDocs {
+				row.Doc = doc
+			}
+			response.Rows = append(response.Rows, row)
+		}
+
+		return nil
+	})
+	return response, err
+}

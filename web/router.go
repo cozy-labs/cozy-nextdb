@@ -101,6 +101,7 @@ func Handler(s *Server) *echo.Echo {
 	e.HEAD("/:db", s.GetDatabase)
 	e.PUT("/:db", s.CreateDatabase)
 
+	e.GET("/:db/_all_docs", s.GetAllDocs)
 	e.POST("/:db", s.CreateDocument)
 	e.GET("/:db/:docid", s.GetDocument)
 	e.HEAD("/:db/:docid", s.GetDocument)
@@ -156,6 +157,31 @@ func (s *Server) CreateDatabase(c echo.Context) error {
 		return c.JSON(http.StatusPreconditionFailed, map[string]any{
 			"error":  err.Error(),
 			"reason": "The database could not be created, the file already exists.",
+		})
+	default:
+		return c.JSON(http.StatusInternalServerError, map[string]any{
+			"error":  "internal_server_error",
+			"reason": err.Error(),
+		})
+	}
+}
+
+// GetAllDocs is the handler for GET /:db/_all_docs. It returns all of the
+// documents in the database (ie normal docs and design docs, but not local
+// docs).
+func (s *Server) GetAllDocs(c echo.Context) error {
+	op := newOperator(s, c)
+	params := core.AllDocsParams{
+		IncludeDocs: c.QueryParam("include_docs") == "true",
+	}
+	result, err := op.GetAllDocs(c.Param("db"), params)
+	switch {
+	case err == nil:
+		return c.JSON(http.StatusOK, result)
+	case errors.Is(err, core.ErrNotFound):
+		return c.JSON(http.StatusNotFound, map[string]any{
+			"error":  err.Error(),
+			"reason": "missing",
 		})
 	default:
 		return c.JSON(http.StatusInternalServerError, map[string]any{

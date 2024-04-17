@@ -140,6 +140,48 @@ func (o *Operator) ExecDeleteRow(tx pgx.Tx, tableName, doctype string, kind RowK
 	return tag.RowsAffected() == 1, nil
 }
 
+const GetDocumentsSQL = `
+SELECT blob
+FROM %s
+WHERE doctype = $1
+AND kind = '%s';
+`
+
+func (o *Operator) ExecGetDocuments(tx pgx.Tx, tableName, doctype string) ([]map[string]any, error) {
+	sql := fmt.Sprintf(GetDocumentsSQL, tableName, NormalDocKind)
+	sql = strings.ReplaceAll(sql, "\n", " ")
+	rows, err := tx.Query(o.Ctx, sql, doctype)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (map[string]any, error) {
+		var doc map[string]any
+		err := row.Scan(&doc)
+		return doc, err
+	})
+}
+
+const GetIDRevsSQL = `
+SELECT blob ->> '_id', blob ->> '_rev'
+FROM %s
+WHERE doctype = $1
+AND kind = '%s';
+`
+
+func (o *Operator) ExecGetIDRevs(tx pgx.Tx, tableName, doctype string) ([]map[string]any, error) {
+	sql := fmt.Sprintf(GetIDRevsSQL, tableName, NormalDocKind)
+	sql = strings.ReplaceAll(sql, "\n", " ")
+	rows, err := tx.Query(o.Ctx, sql, doctype)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (map[string]any, error) {
+		var id, rev string
+		err := row.Scan(&id, &rev)
+		return map[string]any{"_id": id, "_rev": rev}, err
+	})
+}
+
 const CheckDoctypeExistsSQL = `
 SELECT COUNT(*)
 FROM %s
