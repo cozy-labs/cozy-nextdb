@@ -472,12 +472,7 @@ func (o *Operator) GetAllDocs(databaseName string, params AllDocsParams) (*AllDo
 		}
 
 		// TODO we should also include design docs
-		var docs []map[string]any
-		if params.IncludeDocs {
-			docs, err = o.ExecGetDocuments(tx, table, doctype)
-		} else {
-			docs, err = o.ExecGetIDRevs(tx, table, doctype)
-		}
+		docs, err := o.ExecGetAllDocs(tx, table, doctype, params)
 		if err != nil {
 			return err
 		}
