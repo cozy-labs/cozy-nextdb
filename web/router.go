@@ -104,6 +104,7 @@ func Handler(s *Server) *echo.Echo {
 	e.POST("/:db", s.CreateDocument)
 	e.GET("/:db/:docid", s.GetDocument)
 	e.HEAD("/:db/:docid", s.GetDocument)
+	e.PUT("/:db/:docid", s.PutDocument)
 	e.DELETE("/:db/:docid", s.DeleteDocument)
 
 	return e
@@ -228,6 +229,48 @@ func (s *Server) GetDocument(c echo.Context) error {
 	}
 }
 
+// PutDocument is the handler for PUT /:db/:docid. It creates a new document or
+// a new revision of an existing document.
+func (s *Server) PutDocument(c echo.Context) error {
+	op := newOperator(s, c)
+	docID := c.Param("docid")
+	rev := c.QueryParam("rev")
+	if rev == "" {
+		rev = c.Request().Header.Get("If-Match")
+	}
+	doc, err := op.PutDocument(c.Param("db"), docID, rev, c.Request().Body)
+	switch {
+	case err == nil:
+		rev, _ := doc["_rev"].(string)
+		c.Response().Header().Set("ETag", rev)
+		return c.JSON(http.StatusCreated, map[string]any{
+			"ok":  true,
+			"id":  doc["_id"],
+			"rev": doc["_rev"],
+		})
+	case errors.Is(err, core.ErrBadRequest):
+		return c.JSON(http.StatusBadRequest, map[string]any{
+			"error":  err.Error(),
+			"reason": "invalid UTF-8 JSON",
+		})
+	case errors.Is(err, core.ErrNotFound):
+		return c.JSON(http.StatusNotFound, map[string]any{
+			"error":  err.Error(),
+			"reason": "Database does not exist.",
+		})
+	case errors.Is(err, core.ErrConflict):
+		return c.JSON(http.StatusConflict, map[string]any{
+			"error":  err.Error(),
+			"reason": "Document update conflict.",
+		})
+	default:
+		return c.JSON(http.StatusInternalServerError, map[string]any{
+			"error":  "internal_server_error",
+			"reason": err.Error(),
+		})
+	}
+}
+
 // DeleteDocument is the handler for DELETE /:db/:docid. It marks the given
 // document as deleted.
 func (s *Server) DeleteDocument(c echo.Context) error {
@@ -237,9 +280,10 @@ func (s *Server) DeleteDocument(c echo.Context) error {
 	if rev == "" {
 		rev = c.Request().Header.Get("If-Match")
 	}
-	rev, err := op.DeleteDocument(c.Param("db"), docID, rev)
+	doc, err := op.DeleteDocument(c.Param("db"), docID, rev)
 	switch {
 	case err == nil:
+		rev, _ := doc["_rev"].(string)
 		c.Response().Header().Set("ETag", rev)
 		return c.JSON(http.StatusOK, map[string]any{
 			"ok":  true,

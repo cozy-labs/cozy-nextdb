@@ -57,19 +57,32 @@ func (o *Operator) CreateDocument(databaseName string, r io.Reader) (map[string]
 		return nil, ErrBadRequest
 	}
 
-	id, ok := doc["_id"].(string)
-	if !ok {
-		id = ShortUUID()
-		doc["_id"] = id
+	docID, _ := doc["_id"].(string)
+	if docID == "" {
+		docID = ShortUUID()
+		doc["_id"] = docID
+		body, err = json.Marshal(doc)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if _, ok := doc["_rev"]; ok {
 		return nil, ErrConflict
 	}
+
+	if doc["_deleted"] == true {
+		return o.doCreateDeletedDocument(table, doctype, docID)
+	}
+
 	revSum := ComputeRevisionSum(body)
 	doc["_rev"] = "1-" + revSum
 
-	err = o.ReadWriteTx(func(tx pgx.Tx) error {
+	return o.doCreateDocument(table, doctype, docID, revSum, doc)
+}
+
+func (o *Operator) doCreateDocument(table, doctype, docID, revSum string, doc map[string]any) (map[string]any, error) {
+	err := o.ReadWriteTx(func(tx pgx.Tx) error {
 		ok, err := o.ExecIncrementDocCount(tx, table, doctype)
 		if err != nil {
 			if pgErr, ok := err.(*pgconn.PgError); ok {
@@ -83,7 +96,8 @@ func (o *Operator) CreateDocument(databaseName string, r io.Reader) (map[string]
 			return ErrNotFound
 		}
 
-		ok, err = o.ExecInsertRow(tx, table, doctype, NormalDocKind, id, doc)
+		// TODO what if the document had been created, deleted, and we try again to recreate it?
+		ok, err = o.ExecInsertRow(tx, table, doctype, NormalDocKind, docID, doc)
 		if err != nil {
 			if pgErr, ok := err.(*pgconn.PgError); ok {
 				if pgErr.Code == pgerrcode.UniqueViolation {
@@ -100,7 +114,7 @@ func (o *Operator) CreateDocument(databaseName string, r io.Reader) (map[string]
 			Start: 1,
 			IDs:   []string{revSum},
 		}
-		ok, err = o.ExecInsertRow(tx, table, doctype, RevisionsKind, id, blob)
+		ok, err = o.ExecInsertRow(tx, table, doctype, RevisionsKind, docID, blob)
 		if err != nil {
 			if pgErr, ok := err.(*pgconn.PgError); ok {
 				if pgErr.Code == pgerrcode.UniqueViolation {
@@ -121,15 +135,146 @@ func (o *Operator) CreateDocument(databaseName string, r io.Reader) (map[string]
 	return doc, err
 }
 
-func (o *Operator) GetDocument(databaseName, docID string, withRevisions bool) (map[string]any, error) {
+func (o *Operator) doCreateDeletedDocument(table, doctype, docID string) (map[string]any, error) {
+	doc := map[string]any{"_id": docID, "_deleted": true}
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return nil, err
+	}
+	revSum := ComputeRevisionSum(body)
+	newRev := fmt.Sprintf("1-%s", revSum)
+	doc["_rev"] = newRev
+
+	err = o.ReadWriteTx(func(tx pgx.Tx) error {
+		// TODO what if the document had been created, deleted, and we try again to recreate it?
+		ok, err := o.ExecInsertRow(tx, table, doctype, NormalDocKind, docID, doc)
+		if err != nil {
+			if pgErr, ok := err.(*pgconn.PgError); ok {
+				if pgErr.Code == pgerrcode.UniqueViolation {
+					return ErrConflict
+				}
+			}
+			return err
+		}
+		if !ok {
+			return ErrInternalServerError
+		}
+
+		blob := RevsStruct{
+			Start: 1,
+			IDs:   []string{revSum},
+		}
+		ok, err = o.ExecInsertRow(tx, table, doctype, RevisionsKind, docID, blob)
+		if err != nil {
+			if pgErr, ok := err.(*pgconn.PgError); ok {
+				if pgErr.Code == pgerrcode.UniqueViolation {
+					return ErrConflict
+				}
+			}
+			return err
+		}
+		if !ok {
+			return ErrInternalServerError
+		}
+
+		// TODO insert row for the changes feed
+
+		return nil
+	})
+
+	return doc, err
+}
+
+func (o *Operator) PutDocument(databaseName, docID, currentRev string, r io.Reader) (map[string]any, error) {
 	table, doctype, err := ParseDatabaseName(databaseName)
 	if err != nil {
 		return nil, err
 	}
 
-	var result map[string]any
-	err = o.ReadOnlyTx(func(tx pgx.Tx) error {
-		res, err := o.ExecGetRow(tx, table, doctype, NormalDocKind, docID)
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	doc := map[string]any{}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return nil, ErrBadRequest
+	}
+
+	bodyInvalidated := false
+	if id, _ := doc["_id"].(string); id == "" {
+		doc["_id"] = docID
+		bodyInvalidated = true
+	}
+
+	rev := currentRev
+	if _, hasRev := doc["_rev"]; hasRev {
+		rev, _ = doc["_rev"].(string)
+		if rev == "" {
+			return nil, ErrConflict
+		}
+		if currentRev != "" && rev != currentRev {
+			return nil, ErrConflict
+		}
+	} else if currentRev != "" {
+		doc["_rev"] = currentRev
+		bodyInvalidated = true
+	}
+
+	if doc["_deleted"] == true {
+		if rev == "" {
+			return o.doCreateDeletedDocument(table, doctype, docID)
+		}
+		return o.doDeleteDocument(table, doctype, docID, rev)
+	}
+
+	if bodyInvalidated {
+		body, err = json.Marshal(doc)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	gen := 0
+	if rev != "" {
+		gen = ExtractGeneration(rev)
+		if gen <= 0 {
+			fmt.Printf("\n\n*** gen=%d rev=%s\n\n", gen, rev)
+			return nil, ErrConflict
+		}
+	}
+	revSum := ComputeRevisionSum(body)
+	newRev := fmt.Sprintf("%d-%s", gen+1, revSum)
+	doc["_rev"] = newRev
+
+	if gen == 0 {
+		return o.doCreateDocument(table, doctype, docID, revSum, doc)
+	}
+	return o.doUpdateDocument(table, doctype, docID, currentRev, revSum, doc)
+}
+
+func (o *Operator) doUpdateDocument(table, doctype, docID, currentRev, revSum string, doc map[string]any) (map[string]any, error) {
+	err := o.ReadWriteTx(func(tx pgx.Tx) error {
+		ok, err := o.ExecUpdateDocument(tx, table, doctype, NormalDocKind, docID, currentRev, doc)
+		if err != nil {
+			if pgErr, ok := err.(*pgconn.PgError); ok {
+				if pgErr.Code == pgerrcode.UniqueViolation {
+					return ErrConflict
+				}
+			}
+			return err
+		}
+		if !ok {
+			// We are making a request just to return the correct error message
+			var result map[string]any
+			err := o.ExecGetRow(tx, table, doctype, NormalDocKind, docID, &result)
+			if err != nil {
+				return ErrNotFound
+			}
+			return ErrConflict
+		}
+
+		var revisions RevsStruct
+		err = o.ExecGetRow(tx, table, doctype, RevisionsKind, docID, &revisions)
 		if err != nil {
 			if pgErr, ok := err.(*pgconn.PgError); ok {
 				if pgErr.Code == pgerrcode.UndefinedTable {
@@ -141,13 +286,60 @@ func (o *Operator) GetDocument(databaseName, docID string, withRevisions bool) (
 			}
 			return err
 		}
-		if deleted, _ := res["_deleted"].(bool); deleted {
+		revisions.Start++
+		revisions.IDs = prepend(revSum, revisions.IDs)
+		ok, err = o.ExecUpdateRow(tx, table, doctype, RevisionsKind, docID, revisions)
+		if err != nil {
+			if pgErr, ok := err.(*pgconn.PgError); ok {
+				if pgErr.Code == pgerrcode.UniqueViolation {
+					return ErrConflict
+				}
+			}
+			return err
+		}
+		if !ok {
+			return ErrInternalServerError
+		}
+
+		// TODO insert row for the changes feed
+
+		return nil
+	})
+
+	return doc, err
+}
+
+func prepend(item string, slice []string) []string {
+	return append([]string{item}, slice...)
+}
+
+func (o *Operator) GetDocument(databaseName, docID string, withRevisions bool) (map[string]any, error) {
+	table, doctype, err := ParseDatabaseName(databaseName)
+	if err != nil {
+		return nil, err
+	}
+
+	var result map[string]any
+	err = o.ReadOnlyTx(func(tx pgx.Tx) error {
+		err = o.ExecGetRow(tx, table, doctype, NormalDocKind, docID, &result)
+		if err != nil {
+			if pgErr, ok := err.(*pgconn.PgError); ok {
+				if pgErr.Code == pgerrcode.UndefinedTable {
+					return ErrNotFound
+				}
+			}
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if deleted, _ := result["_deleted"].(bool); deleted {
 			return ErrDeleted
 		}
-		result = res
 
 		if withRevisions {
-			revisions, err := o.ExecGetRow(tx, table, doctype, RevisionsKind, docID)
+			var revisions map[string]any
+			err = o.ExecGetRow(tx, table, doctype, RevisionsKind, docID, &revisions)
 			if err != nil {
 				return err
 			}
@@ -159,20 +351,24 @@ func (o *Operator) GetDocument(databaseName, docID string, withRevisions bool) (
 	return result, err
 }
 
-func (o *Operator) DeleteDocument(databaseName, docID, rev string) (string, error) {
+func (o *Operator) DeleteDocument(databaseName, docID, currentRev string) (map[string]any, error) {
 	table, doctype, err := ParseDatabaseName(databaseName)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	gen := ExtractGeneration(rev)
+	return o.doDeleteDocument(table, doctype, docID, currentRev)
+}
+
+func (o *Operator) doDeleteDocument(table, doctype, docID, currentRev string) (map[string]any, error) {
+	gen := ExtractGeneration(currentRev)
 	if gen <= 0 {
-		return "", ErrConflict
+		return nil, ErrConflict
 	}
 
-	doc := map[string]any{"_id": docID, "_rev": rev, "_deleted": true}
+	doc := map[string]any{"_id": docID, "_rev": currentRev, "_deleted": true}
 	body, err := json.Marshal(doc)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	revSum := ComputeRevisionSum(body)
 	newRev := fmt.Sprintf("%d-%s", gen+1, revSum)
@@ -192,7 +388,7 @@ func (o *Operator) DeleteDocument(databaseName, docID, rev string) (string, erro
 			return ErrNotFound
 		}
 
-		ok, err = o.ExecUpdateRow(tx, table, doctype, NormalDocKind, docID, rev, doc)
+		ok, err = o.ExecUpdateDocument(tx, table, doctype, NormalDocKind, docID, currentRev, doc)
 		if err != nil {
 			if pgErr, ok := err.(*pgconn.PgError); ok {
 				if pgErr.Code == pgerrcode.UndefinedTable {
@@ -202,7 +398,9 @@ func (o *Operator) DeleteDocument(databaseName, docID, rev string) (string, erro
 			return err
 		}
 		if !ok {
-			_, err := o.ExecGetRow(tx, table, doctype, NormalDocKind, docID)
+			// We are making a request just to return the correct error message
+			var result map[string]any
+			err := o.ExecGetRow(tx, table, doctype, NormalDocKind, docID, &result)
 			if err != nil {
 				return ErrNotFound
 			}
@@ -221,5 +419,5 @@ func (o *Operator) DeleteDocument(databaseName, docID, rev string) (string, erro
 
 		return nil
 	})
-	return newRev, err
+	return doc, err
 }

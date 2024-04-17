@@ -55,14 +55,14 @@ func ParseDatabaseName(databaseName string) (string, string, error) {
 	return "noprefix", databaseName, nil
 }
 
-func (o *Operator) GetDatabase(databaseName string) (any, error) {
-	var result any
+func (o *Operator) GetDatabase(databaseName string) (map[string]any, error) {
 	table, doctype, err := ParseDatabaseName(databaseName)
 	if err != nil {
 		return nil, err
 	}
+	var result map[string]any
 	err = o.ReadOnlyTx(func(tx pgx.Tx) error {
-		res, err := o.ExecGetRow(tx, table, doctype, DoctypeKind, doctype)
+		err = o.ExecGetRow(tx, table, doctype, DoctypeKind, doctype, &result)
 		if err != nil {
 			if pgErr, ok := err.(*pgconn.PgError); ok {
 				if pgErr.Code == pgerrcode.UndefinedTable {
@@ -74,7 +74,6 @@ func (o *Operator) GetDatabase(databaseName string) (any, error) {
 			}
 			return err
 		}
-		result = res
 		return nil
 	})
 	return result, err

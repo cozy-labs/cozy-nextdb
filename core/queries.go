@@ -80,12 +80,10 @@ AND row_id = $2
 AND kind = '%s';
 `
 
-func (o *Operator) ExecGetRow(tx pgx.Tx, tableName, doctype string, kind RowKind, id string) (map[string]any, error) {
-	var blob map[string]any
+func (o *Operator) ExecGetRow(tx pgx.Tx, tableName, doctype string, kind RowKind, id string, blob any) error {
 	sql := fmt.Sprintf(GetRowSQL, tableName, kind)
 	sql = strings.ReplaceAll(sql, "\n", " ")
-	err := tx.QueryRow(o.Ctx, sql, doctype, id).Scan(&blob)
-	return blob, err
+	return tx.QueryRow(o.Ctx, sql, doctype, id).Scan(blob)
 }
 
 const DeleteRowSQL = `
@@ -95,7 +93,7 @@ AND row_id = $2
 AND kind = '%s';
 `
 
-const UpdateRowSQL = `
+const UpdateDocumentSQL = `
 UPDATE %s
 SET blob = $1
 WHERE kind = '%s'
@@ -104,10 +102,28 @@ AND row_id = $3
 AND blob ->> '_rev' = $4;
 `
 
-func (o *Operator) ExecUpdateRow(tx pgx.Tx, tableName, doctype string, kind RowKind, docID, rev string, blob any) (bool, error) {
-	sql := fmt.Sprintf(UpdateRowSQL, tableName, kind)
+func (o *Operator) ExecUpdateDocument(tx pgx.Tx, tableName, doctype string, kind RowKind, docID, rev string, blob any) (bool, error) {
+	sql := fmt.Sprintf(UpdateDocumentSQL, tableName, kind)
 	sql = strings.ReplaceAll(sql, "\n", " ")
 	tag, err := tx.Exec(o.Ctx, sql, blob, doctype, docID, rev)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+const UpdateRowSQL = `
+UPDATE %s
+SET blob = $1
+WHERE kind = '%s'
+AND doctype = $2
+AND row_id = $3
+`
+
+func (o *Operator) ExecUpdateRow(tx pgx.Tx, tableName, doctype string, kind RowKind, docID string, blob any) (bool, error) {
+	sql := fmt.Sprintf(UpdateRowSQL, tableName, kind)
+	sql = strings.ReplaceAll(sql, "\n", " ")
+	tag, err := tx.Exec(o.Ctx, sql, blob, doctype, docID)
 	if err != nil {
 		return false, err
 	}
