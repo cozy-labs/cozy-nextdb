@@ -2,12 +2,14 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"time"
 
 	"github.com/cozy-labs/cozy-nextdb/core"
@@ -173,7 +175,66 @@ func (s *Server) GetAllDocs(c echo.Context) error {
 	op := newOperator(s, c)
 	params := core.AllDocsParams{
 		IncludeDocs: c.QueryParam("include_docs") == "true",
+		Descending:  c.QueryParam("descending") == "true",
 	}
+	var key string
+	if startKey := c.QueryParam("startkey"); startKey != "" {
+		if err := json.Unmarshal([]byte(startKey), &key); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]any{
+				"error":  "bad_request",
+				"reason": err.Error(),
+			})
+		}
+		params.StartKey = key
+	}
+	if startKey := c.QueryParam("start_key"); startKey != "" {
+		if err := json.Unmarshal([]byte(startKey), &key); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]any{
+				"error":  "bad_request",
+				"reason": err.Error(),
+			})
+		}
+		params.StartKey = key
+	}
+	if endKey := c.QueryParam("endkey"); endKey != "" {
+		if err := json.Unmarshal([]byte(endKey), &key); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]any{
+				"error":  "bad_request",
+				"reason": err.Error(),
+			})
+		}
+		params.EndKey = key
+	}
+	if endKey := c.QueryParam("end_key"); endKey != "" {
+		if err := json.Unmarshal([]byte(endKey), &key); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]any{
+				"error":  "bad_request",
+				"reason": err.Error(),
+			})
+		}
+		params.EndKey = key
+	}
+	if limit := c.QueryParam("limit"); limit != "" {
+		nb, err := strconv.Atoi(limit)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]any{
+				"error":  "query_parse_error",
+				"reason": err.Error(),
+			})
+		}
+		params.Limit = nb
+	}
+	if skip := c.QueryParam("skip"); skip != "" {
+		nb, err := strconv.Atoi(skip)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]any{
+				"error":  "query_parse_error",
+				"reason": err.Error(),
+			})
+		}
+		params.Skip = nb
+	}
+
 	result, err := op.GetAllDocs(c.Param("db"), params)
 	switch {
 	case err == nil:

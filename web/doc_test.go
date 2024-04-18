@@ -262,22 +262,42 @@ func TestDoc(t *testing.T) {
 			WithHeader("Content-Type", "application/json").
 			WithBytes([]byte(`{"_id": "baz", "value": "baz"}`)).
 			Expect().Status(201)
+		e.POST("/{db}").WithPath("db", "cozy5%2Fdoctype1").
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(`{"_id": "qux", "value": "qux"}`)).
+			Expect().Status(201)
+		e.POST("/{db}").WithPath("db", "cozy5%2Fdoctype1").
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(`{"_id": "quux", "value": "quux"}`)).
+			Expect().Status(201)
 
 		// Check errors
-		e.HEAD("/{db}/_all_docs").WithPath("db", "cozy0%2Fdoctype1").
+		e.GET("/{db}/_all_docs").WithPath("db", "cozy0%2Fdoctype1").
 			Expect().Status(404)
-		e.HEAD("/{db}/_all_docs").WithPath("db", "cozy5%2Fdoctype2").
+		e.GET("/{db}/_all_docs").WithPath("db", "cozy5%2Fdoctype2").
 			Expect().Status(404)
+		e.GET("/{db}/_all_docs").WithPath("db", "cozy5%2Fdoctype1").
+			WithQuery("limit", "foo").
+			Expect().Status(400)
+		e.GET("/{db}/_all_docs").WithPath("db", "cozy5%2Fdoctype1").
+			WithQuery("skip", "---").
+			Expect().Status(400)
+		e.GET("/{db}/_all_docs").WithPath("db", "cozy5%2Fdoctype1").
+			WithQuery("startkey", "not_json").
+			Expect().Status(400)
+		e.GET("/{db}/_all_docs").WithPath("db", "cozy5%2Fdoctype1").
+			WithQuery("end_key", "not_json").
+			Expect().Status(400)
 
-		// Test without include_docs
+		// Test no parameters
 		obj := e.GET("/{db}/_all_docs").WithPath("db", "cozy5%2Fdoctype1").
 			Expect().Status(200).
 			JSON().Object()
-		obj.HasValue("total_rows", 3)
+		obj.HasValue("total_rows", 5)
 		obj.HasValue("offset", 0)
 		rows := obj.Value("rows").Array()
-		rows.Length().IsEqual(3)
-		for i, key := range []string{"bar", "baz", "foo"} {
+		rows.Length().IsEqual(5)
+		for i, key := range []string{"bar", "baz", "foo", "quux", "qux"} {
 			row := rows.Value(i).Object()
 			row.HasValue("id", key)
 			row.HasValue("key", key)
@@ -290,16 +310,59 @@ func TestDoc(t *testing.T) {
 			WithQuery("include_docs", "true").
 			Expect().Status(200).
 			JSON().Object()
-		obj.HasValue("total_rows", 3)
+		obj.HasValue("total_rows", 5)
 		obj.HasValue("offset", 0)
 		rows = obj.Value("rows").Array()
-		rows.Length().IsEqual(3)
-		for i, key := range []string{"bar", "baz", "foo"} {
+		rows.Length().IsEqual(5)
+		for i, key := range []string{"bar", "baz", "foo", "quux", "qux"} {
 			row := rows.Value(i).Object()
 			row.HasValue("id", key)
 			row.HasValue("key", key)
 			row.Value("value").Object().Value("rev").String().NotEmpty()
 			row.Value("doc").Object().HasValue("value", key)
+		}
+
+		// Test with limit and skip
+		obj = e.GET("/{db}/_all_docs").WithPath("db", "cozy5%2Fdoctype1").
+			WithQuery("limit", "3").
+			WithQuery("skip", "1").
+			Expect().Status(200).
+			JSON().Object()
+		obj.HasValue("total_rows", 5)
+		obj.HasValue("offset", 1)
+		rows = obj.Value("rows").Array()
+		rows.Length().IsEqual(3)
+		for i, key := range []string{"baz", "foo", "quux"} {
+			rows.Value(i).Object().HasValue("id", key)
+		}
+
+		// Test with startkey and endkey
+		obj = e.GET("/{db}/_all_docs").WithPath("db", "cozy5%2Fdoctype1").
+			WithQuery("startkey", `"baz"`).
+			WithQuery("endkey", `"quux"`).
+			Expect().Status(200).
+			JSON().Object()
+		obj.HasValue("total_rows", 5)
+		obj.HasValue("offset", 0)
+		rows = obj.Value("rows").Array()
+		rows.Length().IsEqual(3)
+		for i, key := range []string{"baz", "foo", "quux"} {
+			rows.Value(i).Object().HasValue("id", key)
+		}
+
+		// Test with descending, start_key and end_key
+		obj = e.GET("/{db}/_all_docs").WithPath("db", "cozy5%2Fdoctype1").
+			WithQuery("descending", "true").
+			WithQuery("startkey", `"quux"`).
+			WithQuery("endkey", `"baz"`).
+			Expect().Status(200).
+			JSON().Object()
+		obj.HasValue("total_rows", 5)
+		obj.HasValue("offset", 0)
+		rows = obj.Value("rows").Array()
+		rows.Length().IsEqual(3)
+		for i, key := range []string{"quux", "foo", "baz"} {
+			rows.Value(i).Object().HasValue("id", key)
 		}
 	})
 }

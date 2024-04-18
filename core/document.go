@@ -424,6 +424,11 @@ func (o *Operator) doDeleteDocument(table, doctype, docID, currentRev string) (m
 
 type AllDocsParams struct {
 	IncludeDocs bool
+	Descending  bool
+	Limit       int
+	Skip        int
+	StartKey    string
+	EndKey      string
 }
 
 type AllDocsResponse struct {
@@ -451,7 +456,7 @@ func (o *Operator) GetAllDocs(databaseName string, params AllDocsParams) (*AllDo
 		return nil, err
 	}
 
-	response := &AllDocsResponse{}
+	response := &AllDocsResponse{Offset: params.Skip}
 	err = o.ReadOnlyTx(func(tx pgx.Tx) error {
 		var db JustDocCount
 		err = o.ExecGetRow(tx, table, doctype, DoctypeKind, doctype, &db)

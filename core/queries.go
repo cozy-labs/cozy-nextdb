@@ -144,7 +144,13 @@ const GetAllDocsSQL = `
 SELECT %s
 FROM %s
 WHERE doctype = $1
-AND kind = '%s';
+AND kind = '%s'
+AND row_id >= $2
+AND row_id <= $3
+ORDER BY row_id %s
+LIMIT %v
+OFFSET $4
+;
 `
 
 func (o *Operator) ExecGetAllDocs(tx pgx.Tx, tableName, doctype string, params AllDocsParams) ([]map[string]any, error) {
@@ -152,9 +158,23 @@ func (o *Operator) ExecGetAllDocs(tx pgx.Tx, tableName, doctype string, params A
 	if params.IncludeDocs {
 		fields = "blob"
 	}
-	sql := fmt.Sprintf(GetAllDocsSQL, fields, tableName, NormalDocKind)
+	var limit any = "All"
+	if params.Limit > 0 {
+		limit = params.Limit
+	}
+	from, to := params.StartKey, params.EndKey
+	if to == "" {
+		to = "\uffff"
+	}
+	order := "ASC"
+	if params.Descending {
+		order = "DESC"
+		from, to = to, from
+	}
+
+	sql := fmt.Sprintf(GetAllDocsSQL, fields, tableName, NormalDocKind, order, limit)
 	sql = strings.ReplaceAll(sql, "\n", " ")
-	rows, err := tx.Query(o.Ctx, sql, doctype)
+	rows, err := tx.Query(o.Ctx, sql, doctype, from, to, params.Skip)
 	if err != nil {
 		return nil, err
 	}
