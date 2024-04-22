@@ -93,6 +93,8 @@ github.com/jackc/pgx/v5 v5.5.6-0.20240407135810-a3d9120636fc h1:KHCAWbdPiLT4C1+7
 github.com/jackc/pgx/v5 v5.5.6-0.20240407135810-a3d9120636fc/go.mod h1:ez9gk+OAat140fv9ErkZDYFWmXLfV+++K0uAOiwgm1A=
 github.com/jackc/puddle/v2 v2.2.1 h1:RhxXJtFG022u4ibrCSMSiu5aOq1i77R3OHKNJj77OAk=
 github.com/jackc/puddle/v2 v2.2.1/go.mod h1:vriiEXHvEE654aYKXXjOvZM39qJ0q+azkZFrfEOc3H4=
+github.com/jaswdr/faker/v2 v2.2.0 h1:e+ib/tgkAHtV2IfJd43cA80uGavbW0DKTAPQyBRPX9E=
+github.com/jaswdr/faker/v2 v2.2.0/go.mod h1:ROK8xwQV0hYOLDUtxCQgHGcl10jbVzIvqHxcIDdwY2Q=
 github.com/kisielk/errcheck v1.5.0/go.mod h1:pFxgyoBC7bSaBwPgfKdkLd5X25qrDl4LWUI2bnpBCr8=
 github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
 github.com/klauspost/compress v1.15.0/go.mod h1:/3/Vjq9QcHkK5uEr5lBEmyoZ1iFhe47etQ6QUkpK6sk=
