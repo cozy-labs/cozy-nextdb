@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cozy-labs/cozy-nextdb/core"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/tracelog"
 	"github.com/lmittmann/tint"
 	"github.com/spf13/viper"
 )
@@ -37,10 +39,6 @@ func initConfig() {
 		fmt.Fprintf(os.Stderr, "Cannot read configuration file: %s\n", err)
 		os.Exit(1)
 	}
-}
-
-func initPG(pgURL string) (*pgxpool.Pool, error) {
-	return pgxpool.New(context.Background(), pgURL)
 }
 
 func initLogger() (*slog.Logger, error) {
@@ -74,4 +72,16 @@ func initLogger() (*slog.Logger, error) {
 		})
 	}
 	return slog.New(handler), nil
+}
+
+func initPG(pgURL string, logger *slog.Logger) (*pgxpool.Pool, error) {
+	config, err := pgxpool.ParseConfig(pgURL)
+	if err != nil {
+		return nil, err
+	}
+	config.ConnConfig.Tracer = &tracelog.TraceLog{
+		Logger:   core.NewPgxLogger(logger),
+		LogLevel: tracelog.LogLevelInfo,
+	}
+	return pgxpool.NewWithConfig(context.Background(), config)
 }

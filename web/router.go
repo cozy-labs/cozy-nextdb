@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,10 +14,13 @@ import (
 	"time"
 
 	"github.com/cozy-labs/cozy-nextdb/core"
+	"github.com/gofrs/uuid/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
+
+const EchoRequestIDKey = "req_id"
 
 // Server is a struct used to run a web server
 type Server struct {
@@ -70,6 +74,23 @@ func Handler(s *Server) *echo.Echo {
 	e.HideBanner = true
 	e.HidePort = true
 
+	e.Pre(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			headers := c.Request().Header
+			reqID := cmp.Or(
+				headers.Get("X-Request-Id"),
+				headers.Get("X-Request-UID"),
+				headers.Get("X-Haproxy-Unique-ID"),
+			)
+			if reqID == "" {
+				if uuidv7, err := uuid.NewV7(); err == nil {
+					reqID = uuidv7.String()
+				}
+			}
+			c.Set(EchoRequestIDKey, reqID)
+			return next(c)
+		}
+	})
 	e.Pre(middleware.RemoveTrailingSlash())
 	e.Use(middleware.RecoverWithConfig(middleware.RecoverConfig{
 		LogErrorFunc: func(c echo.Context, err error, stack []byte) error {
@@ -87,6 +108,7 @@ func Handler(s *Server) *echo.Echo {
 				slog.String("method", v.Method),
 				slog.String("uri", v.URI),
 				slog.Int("status", v.Status),
+				slog.Any("req_id", c.Get(EchoRequestIDKey)),
 			)
 			return nil
 		},
@@ -114,10 +136,13 @@ func Handler(s *Server) *echo.Echo {
 }
 
 func newOperator(s *Server, c echo.Context) *core.Operator {
+	reqID := c.Get(EchoRequestIDKey)
+	logger := s.Logger.With(slog.Any("req_id", reqID))
+	ctx := context.WithValue(c.Request().Context(), core.RequestIDKey{}, reqID)
 	return &core.Operator{
 		PG:     s.PG,
-		Logger: s.Logger,
-		Ctx:    c.Request().Context(),
+		Logger: logger,
+		Ctx:    ctx,
 	}
 }
 

@@ -7,6 +7,8 @@ import (
 	"github.com/jackc/pgx/v5/tracelog"
 )
 
+type RequestIDKey struct{}
+
 type PgxLogger struct {
 	l *slog.Logger
 }
@@ -20,6 +22,13 @@ func (l *PgxLogger) Log(ctx context.Context, level tracelog.LogLevel, msg string
 	for k, v := range data {
 		attrs = append(attrs, slog.Any(k, v))
 	}
-	attrs = append(attrs, slog.String("nspace", "sql"))
-	l.l.LogAttrs(context.Background(), slog.LevelDebug, msg, attrs...)
+	attrs = append(attrs,
+		slog.String("nspace", "sql"),
+		slog.Any("req_id", ctx.Value(RequestIDKey{})),
+	)
+	lvl := slog.LevelDebug
+	if level == tracelog.LogLevelError {
+		lvl = slog.LevelWarn
+	}
+	l.l.LogAttrs(ctx, lvl, msg, attrs...)
 }
