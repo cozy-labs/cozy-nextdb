@@ -30,11 +30,14 @@ func preparePG(t *testing.T) *postgres.PostgresContainer {
 		pg_image = "docker.io/postgres:16-alpine"
 	}
 	image := testcontainers.WithImage(pg_image)
+	var tmpfs testcontainers.CustomizeRequestOption = func(req *testcontainers.GenericContainerRequest) {
+		req.Tmpfs = map[string]string{"/var/lib/postgresql/data": "rw"}
+	}
 	ready := testcontainers.WithWaitStrategy(
 		wait.ForLog("database system is ready to accept connections").
 			WithOccurrence(2).
 			WithStartupTimeout(5 * time.Second))
-	container, err := postgres.RunContainer(ctx, image, ready)
+	container, err := postgres.RunContainer(ctx, image, tmpfs, ready)
 	require.NoError(t, err, "Cannot run the postgres container")
 
 	err = container.Snapshot(ctx, postgres.WithSnapshotName("test-snapshot"))
