@@ -160,6 +160,7 @@ func (s *Server) GetDatabase(c echo.Context) error {
 			"reason": "Database does not exist.",
 		})
 	default:
+		op.Logger.With(slog.Any("error", err.Error())).Error("internal_server_error")
 		return c.JSON(http.StatusInternalServerError, map[string]any{
 			"error":  "internal_server_error",
 			"reason": err.Error(),
@@ -186,6 +187,7 @@ func (s *Server) CreateDatabase(c echo.Context) error {
 			"reason": "The database could not be created, the file already exists.",
 		})
 	default:
+		op.Logger.With(slog.Any("error", err.Error())).Error("internal_server_error")
 		return c.JSON(http.StatusInternalServerError, map[string]any{
 			"error":  "internal_server_error",
 			"reason": err.Error(),
@@ -270,6 +272,7 @@ func (s *Server) GetAllDocs(c echo.Context) error {
 			"reason": "missing",
 		})
 	default:
+		op.Logger.With(slog.Any("error", err.Error())).Error("internal_server_error")
 		return c.JSON(http.StatusInternalServerError, map[string]any{
 			"error":  "internal_server_error",
 			"reason": err.Error(),
@@ -305,6 +308,7 @@ func (s *Server) CreateDocument(c echo.Context) error {
 			"reason": "Document update conflict.",
 		})
 	default:
+		op.Logger.With(slog.Any("error", err.Error())).Error("internal_server_error")
 		return c.JSON(http.StatusInternalServerError, map[string]any{
 			"error":  "internal_server_error",
 			"reason": err.Error(),
@@ -334,6 +338,7 @@ func (s *Server) GetDocument(c echo.Context) error {
 			"reason": "deleted",
 		})
 	default:
+		op.Logger.With(slog.Any("error", err.Error())).Error("internal_server_error")
 		return c.JSON(http.StatusInternalServerError, map[string]any{
 			"error":  "internal_server_error",
 			"reason": err.Error(),
@@ -376,6 +381,7 @@ func (s *Server) PutDocument(c echo.Context) error {
 			"reason": "Document update conflict.",
 		})
 	default:
+		op.Logger.With(slog.Any("error", err.Error())).Error("internal_server_error")
 		return c.JSON(http.StatusInternalServerError, map[string]any{
 			"error":  "internal_server_error",
 			"reason": err.Error(),
@@ -413,6 +419,7 @@ func (s *Server) DeleteDocument(c echo.Context) error {
 			"reason": "Document update conflict.",
 		})
 	default:
+		op.Logger.With(slog.Any("error", err.Error())).Error("internal_server_error")
 		return c.JSON(http.StatusInternalServerError, map[string]any{
 			"error":  "internal_server_error",
 			"reason": err.Error(),
