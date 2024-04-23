@@ -86,13 +86,6 @@ func (o *Operator) ExecGetRow(tx pgx.Tx, tableName, doctype string, kind RowKind
 	return tx.QueryRow(o.Ctx, sql, doctype, id).Scan(blob)
 }
 
-const DeleteRowSQL = `
-DELETE FROM %s
-WHERE doctype = $1
-AND row_id = $2
-AND kind = '%s';
-`
-
 const UpdateDocumentSQL = `
 UPDATE %s
 SET blob = $1
@@ -129,6 +122,13 @@ func (o *Operator) ExecUpdateRow(tx pgx.Tx, tableName, doctype string, kind RowK
 	}
 	return tag.RowsAffected() == 1, nil
 }
+
+const DeleteRowSQL = `
+DELETE FROM %s
+WHERE doctype = $1
+AND row_id = $2
+AND kind = '%s';
+`
 
 func (o *Operator) ExecDeleteRow(tx pgx.Tx, tableName, doctype string, kind RowKind, id string) (bool, error) {
 	sql := fmt.Sprintf(DeleteRowSQL, tableName, kind)
@@ -185,11 +185,27 @@ func (o *Operator) ExecGetAllDocs(tx pgx.Tx, tableName, doctype string, params A
 	})
 }
 
+const DeleteDoctypeSQL = `
+DELETE FROM %s
+WHERE doctype = $1
+`
+
+func (o *Operator) ExecDeleteDoctype(tx pgx.Tx, tableName, doctype string) (bool, error) {
+	sql := fmt.Sprintf(DeleteDoctypeSQL, tableName)
+	sql = strings.ReplaceAll(sql, "\n", " ")
+	tag, err := tx.Exec(o.Ctx, sql, doctype)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 const CheckDoctypeExistsSQL = `
-SELECT COUNT(*)
+SELECT 1
 FROM %s
 WHERE doctype = $1
 AND kind = 'doctype';
+LIMIT 1
 `
 
 func (o *Operator) ExecCheckDoctypeExists(tx pgx.Tx, tableName, doctype string) (bool, error) {
@@ -198,6 +214,29 @@ func (o *Operator) ExecCheckDoctypeExists(tx pgx.Tx, tableName, doctype string) 
 	sql = strings.ReplaceAll(sql, "\n", " ")
 	err := tx.QueryRow(o.Ctx, sql, doctype).Scan(&nb)
 	return nb > 0, err
+}
+
+const CheckTableIsEmptySQL = `
+SELECT NOT EXISTS (SELECT 1 FROM %s) AS is_empty;
+`
+
+func (o *Operator) ExecCheckTableIsEmpty(tx pgx.Tx, tableName string) (bool, error) {
+	var empty bool
+	sql := fmt.Sprintf(CheckTableIsEmptySQL, tableName)
+	sql = strings.ReplaceAll(sql, "\n", " ")
+	err := tx.QueryRow(o.Ctx, sql).Scan(&empty)
+	return empty, err
+}
+
+const DropTableSQL = `
+DROP TABLE %s;
+`
+
+func (o *Operator) ExecDropTable(tx pgx.Tx, tableName string) error {
+	sql := fmt.Sprintf(DropTableSQL, tableName)
+	sql = strings.ReplaceAll(sql, "\n", " ")
+	_, err := tx.Exec(o.Ctx, sql)
+	return err
 }
 
 const IncrementDocCountSQL = `

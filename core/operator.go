@@ -150,3 +150,34 @@ func (o *Operator) CreateDatabase(databaseName string) error {
 		return nil
 	})
 }
+
+func (o *Operator) DeleteDatabase(databaseName string) error {
+	table, doctype, err := ParseDatabaseName(databaseName)
+	if err != nil {
+		return err
+	}
+
+	return o.ReadWriteTx(func(tx pgx.Tx) error {
+		ok, err := o.ExecDeleteDoctype(tx, table, doctype)
+		if err != nil {
+			if pgErr, ok := err.(*pgconn.PgError); ok {
+				if pgErr.Code == pgerrcode.UndefinedTable {
+					return ErrNotFound
+				}
+			}
+			return err
+		}
+		if !ok {
+			return ErrNotFound
+		}
+
+		empty, err := o.ExecCheckTableIsEmpty(tx, table)
+		if err != nil {
+			return err
+		}
+		if empty {
+			return o.ExecDropTable(tx, table)
+		}
+		return nil
+	})
+}

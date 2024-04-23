@@ -146,4 +146,32 @@ func TestCommon(t *testing.T) {
 		e.GET("/{db}").WithPath("db", "no_such_prefix%2Fdoctype").
 			Expect().Status(404)
 	})
+
+	t.Run("Test the DELETE /:db endpoint", func(t *testing.T) {
+		e := launchTestServer(t, logger, connectToPG(t, container, logger))
+		e.PUT("/delete_me").Expect().Status(201).
+			JSON().Object().HasValue("ok", true)
+		e.DELETE("/delete_me").Expect().Status(200).
+			JSON().Object().HasValue("ok", true)
+		e.DELETE("/delete_me").Expect().Status(404).
+			JSON().Object().HasValue("error", "not_found")
+
+		e.PUT("/{db}").WithPath("db", "cozydelete%2Fdoctype1").
+			Expect().Status(201).
+			JSON().Object().HasValue("ok", true)
+		e.PUT("/{db}").WithPath("db", "cozydelete%2Fdoctype2").
+			Expect().Status(201).
+			JSON().Object().HasValue("ok", true)
+		e.DELETE("/{db}").WithPath("db", "cozydelete%2Fdoctype1").
+			Expect().Status(200).
+			JSON().Object().HasValue("ok", true)
+		e.GET("/{db}").WithPath("db", "cozydelete%2Fdoctype2").
+			Expect().Status(200).
+			JSON().Object().HasValue("doc_count", 0)
+		e.DELETE("/{db}").WithPath("db", "cozydelete%2Fdoctype2").
+			Expect().Status(200).
+			JSON().Object().HasValue("ok", true)
+		e.GET("/{db}").WithPath("db", "cozydelete%2Fdoctype2").
+			Expect().Status(404)
+	})
 }

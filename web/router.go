@@ -124,6 +124,7 @@ func Handler(s *Server) *echo.Echo {
 	e.GET("/:db", s.GetDatabase)
 	e.HEAD("/:db", s.GetDatabase)
 	e.PUT("/:db", s.CreateDatabase)
+	e.DELETE("/:db", s.DeleteDatabase)
 
 	e.GET("/:db/_all_docs", s.GetAllDocs)
 	e.POST("/:db", s.CreateDocument)
@@ -185,6 +186,28 @@ func (s *Server) CreateDatabase(c echo.Context) error {
 		return c.JSON(http.StatusPreconditionFailed, map[string]any{
 			"error":  err.Error(),
 			"reason": "The database could not be created, the file already exists.",
+		})
+	default:
+		op.Logger.With(slog.Any("error", err.Error())).Error("internal_server_error")
+		return c.JSON(http.StatusInternalServerError, map[string]any{
+			"error":  "internal_server_error",
+			"reason": err.Error(),
+		})
+	}
+}
+
+// DeleteDatabase is the handler for DELETE /:db. It deletes a database (in the
+// CouchDB meaning, not a PostgreSQL database).
+func (s *Server) DeleteDatabase(c echo.Context) error {
+	op := newOperator(s, c)
+	err := op.DeleteDatabase(c.Param("db"))
+	switch {
+	case err == nil:
+		return c.JSON(http.StatusOK, map[string]any{"ok": true})
+	case errors.Is(err, core.ErrNotFound):
+		return c.JSON(http.StatusNotFound, map[string]any{
+			"error":  err.Error(),
+			"reason": "Database does not exist.",
 		})
 	default:
 		op.Logger.With(slog.Any("error", err.Error())).Error("internal_server_error")
