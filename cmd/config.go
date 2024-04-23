@@ -11,7 +11,6 @@ import (
 
 	"github.com/cozy-labs/cozy-nextdb/core"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/tracelog"
 	"github.com/lmittmann/tint"
 	"github.com/spf13/viper"
 )
@@ -75,13 +74,9 @@ func initLogger() (*slog.Logger, error) {
 }
 
 func initPG(pgURL string, logger *slog.Logger) (*pgxpool.Pool, error) {
-	config, err := pgxpool.ParseConfig(pgURL)
+	config, err := core.NewPgxConfig(pgURL, logger)
 	if err != nil {
 		return nil, err
-	}
-	config.ConnConfig.Tracer = &tracelog.TraceLog{
-		Logger:   core.NewPgxLogger(logger),
-		LogLevel: tracelog.LogLevelInfo,
 	}
 	return pgxpool.NewWithConfig(context.Background(), config)
 }

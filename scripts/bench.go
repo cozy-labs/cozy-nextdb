@@ -29,24 +29,32 @@ const target = "http://admin:password@localhost:5984"
 // const target = "http://localhost:7654"
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error, %s", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	generator := newGenerator()
 
 	if err := createDB(); err != nil {
-		fmt.Fprintf(os.Stderr, "Cannot create db: %s", err)
-		os.Exit(1)
+		return fmt.Errorf("cannot create db: %s", err)
 	}
-	defer deleteDB()
+	defer func() {
+		_ = deleteDB()
+	}()
 
 	contacts := prepareContacts(generator)
 	if err := insertDocs(contacts); err != nil {
-		fmt.Fprintf(os.Stderr, "Cannot insert contacts: %s", err)
-		os.Exit(1)
+		return fmt.Errorf("cannot insert contacts: %s", err)
 	}
 
 	if err := getAllDocs(); err != nil {
-		fmt.Fprintf(os.Stderr, "Cannot get all docs: %s", err)
-		os.Exit(1)
+		return fmt.Errorf("cannot get all docs: %s", err)
 	}
+
+	return nil
 }
 
 func createDB() error {

@@ -13,7 +13,6 @@ import (
 	"github.com/cozy-labs/cozy-nextdb/core"
 	"github.com/gavv/httpexpect/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/tracelog"
 	"github.com/lmittmann/tint"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -69,12 +68,8 @@ func connectToPG(t *testing.T, container *postgres.PostgresContainer, logger *sl
 	ctx := context.Background()
 	pgURL, err := container.ConnectionString(ctx)
 	require.NoError(t, err, "Cannot get connection string for PostgreSQL container")
-	config, err := pgxpool.ParseConfig(pgURL)
+	config, err := core.NewPgxConfig(pgURL, logger)
 	require.NoError(t, err, "Cannot parse config for pgxpool")
-	config.ConnConfig.Tracer = &tracelog.TraceLog{
-		Logger:   core.NewPgxLogger(logger),
-		LogLevel: tracelog.LogLevelInfo,
-	}
 	pg, err := pgxpool.NewWithConfig(ctx, config)
 	require.NoError(t, err, "Cannot create a pgxpool")
 	t.Cleanup(func() {
