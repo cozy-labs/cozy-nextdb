@@ -133,6 +133,8 @@ func Handler(s *Server) *echo.Echo {
 	e.PUT("/:db/:docid", s.PutDocument)
 	e.DELETE("/:db/:docid", s.DeleteDocument)
 
+	e.POST("/:db/_find", s.FindMango)
+
 	return e
 }
 
@@ -440,6 +442,36 @@ func (s *Server) DeleteDocument(c echo.Context) error {
 		return c.JSON(http.StatusConflict, map[string]any{
 			"error":  err.Error(),
 			"reason": "Document update conflict.",
+		})
+	default:
+		op.Logger.With(slog.Any("error", err.Error())).Error("internal_server_error")
+		return c.JSON(http.StatusInternalServerError, map[string]any{
+			"error":  "internal_server_error",
+			"reason": err.Error(),
+		})
+	}
+}
+
+// FindMango is the handler for POST /:db/_find. It finds documents using a
+// declarative JSON querying syntax.
+func (s *Server) FindMango(c echo.Context) error {
+	op := newOperator(s, c)
+	var params core.MangoParams
+	if err := json.NewDecoder(c.Request().Body).Decode(&params); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{
+			"error":  err.Error(),
+			"reason": "invalid UTF-8 JSON",
+		})
+	}
+
+	result, err := op.FindMango(c.Param("db"), params)
+	switch {
+	case err == nil:
+		return c.JSON(http.StatusOK, result)
+	case errors.Is(err, core.ErrNotFound):
+		return c.JSON(http.StatusNotFound, map[string]any{
+			"error":  err.Error(),
+			"reason": "missing",
 		})
 	default:
 		op.Logger.With(slog.Any("error", err.Error())).Error("internal_server_error")
