@@ -1,17 +1,22 @@
 package web
 
 import (
+	"context"
+	"runtime/trace"
 	"strings"
 	"testing"
 )
 
 func TestDoc(t *testing.T) {
 	t.Parallel()
-	container := preparePG(t)
+	ctx := context.Background()
+	ctx, task := trace.NewTask(ctx, "TestDoc")
+	defer task.End()
+	container := preparePG(t, ctx)
 	logger := setupLogger(t)
 
 	t.Run("Test the POST /:db endpoint", func(t *testing.T) {
-		e := launchTestServer(t, logger, connectToPG(t, container, logger))
+		e := launchTestServer(t, ctx, logger, connectToPG(t, container, logger))
 		e.PUT("/{db}").WithPath("db", "cozy1%2Fdoctype1").
 			Expect().Status(201).
 			JSON().Object().HasValue("ok", true)
@@ -72,7 +77,7 @@ func TestDoc(t *testing.T) {
 	})
 
 	t.Run("Test the GET /:db/:docid endpoint", func(t *testing.T) {
-		e := launchTestServer(t, logger, connectToPG(t, container, logger))
+		e := launchTestServer(t, ctx, logger, connectToPG(t, container, logger))
 		e.PUT("/{db}").WithPath("db", "cozy2%2Fdoctype1").
 			Expect().Status(201).
 			JSON().Object().HasValue("ok", true)
@@ -116,7 +121,7 @@ func TestDoc(t *testing.T) {
 	})
 
 	t.Run("Test the DELETE /:db/:docid endpoint", func(t *testing.T) {
-		e := launchTestServer(t, logger, connectToPG(t, container, logger))
+		e := launchTestServer(t, ctx, logger, connectToPG(t, container, logger))
 		e.PUT("/{db}").WithPath("db", "cozy3%2Fdoctype1").
 			Expect().Status(201).
 			JSON().Object().HasValue("ok", true)
@@ -152,7 +157,7 @@ func TestDoc(t *testing.T) {
 	})
 
 	t.Run("Test the PUT /:db/:doctype endpoint", func(t *testing.T) {
-		e := launchTestServer(t, logger, connectToPG(t, container, logger))
+		e := launchTestServer(t, ctx, logger, connectToPG(t, container, logger))
 		e.PUT("/{db}").WithPath("db", "cozy4%2Fdoctype1").
 			Expect().Status(201).
 			JSON().Object().HasValue("ok", true)
@@ -246,7 +251,7 @@ func TestDoc(t *testing.T) {
 	})
 
 	t.Run("Test the GET /:db/_all_docs endpoint", func(t *testing.T) {
-		e := launchTestServer(t, logger, connectToPG(t, container, logger))
+		e := launchTestServer(t, ctx, logger, connectToPG(t, container, logger))
 		e.PUT("/{db}").WithPath("db", "cozy5%2Fdoctype1").
 			Expect().Status(201).
 			JSON().Object().HasValue("ok", true)

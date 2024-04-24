@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/trace"
 	"strconv"
 	"time"
 
@@ -117,6 +118,21 @@ func Handler(s *Server) *echo.Echo {
 			return path == "/status"
 		},
 	}))
+
+	if trace.IsEnabled() {
+		e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+			return func(c echo.Context) error {
+				var err error
+				req := c.Request()
+				ctx := req.Context()
+				trace.WithRegion(ctx, "Echo handler", func() {
+					trace.Logf(ctx, "HTTP request", "%s %s", req.Method, req.URL.Path)
+					err = next(c)
+				})
+				return err
+			}
+		})
+	}
 
 	e.GET("/status", s.Status)
 	e.HEAD("/status", s.Status)

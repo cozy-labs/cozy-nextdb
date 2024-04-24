@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"log/slog"
+	"runtime/trace"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -10,16 +11,21 @@ import (
 )
 
 type RequestIDKey struct{}
+type TraceRegionKey struct{}
 
 func NewPgxConfig(pgURL string, logger *slog.Logger) (*pgxpool.Config, error) {
 	config, err := pgxpool.ParseConfig(pgURL)
 	if err != nil {
 		return nil, err
 	}
-	// Trace the SQL queries and send the result in logs.
-	config.ConnConfig.Tracer = &tracelog.TraceLog{
-		Logger:   &pgxLogger{l: logger},
-		LogLevel: tracelog.LogLevelInfo,
+	if trace.IsEnabled() {
+		config.ConnConfig.Tracer = &pgxTracer{}
+	} else {
+		// Trace the SQL queries and send the result in logs.
+		config.ConnConfig.Tracer = &tracelog.TraceLog{
+			Logger:   &pgxLogger{l: logger},
+			LogLevel: tracelog.LogLevelInfo,
+		}
 	}
 	// Disable prepared statements. Prepared statements are bound to a table
 	// and a connection. With many tables and a pool of connections, they take
@@ -56,4 +62,56 @@ func (l *pgxLogger) Log(ctx context.Context, level tracelog.LogLevel, msg string
 		lvl = slog.LevelWarn
 	}
 	l.l.LogAttrs(ctx, lvl, msg, attrs...)
+}
+
+type pgxTracer struct{}
+
+func (t *pgxTracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	region := trace.StartRegion(ctx, "pgx query")
+	return context.WithValue(ctx, TraceRegionKey{}, region)
+}
+
+func (t *pgxTracer) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryEndData) {
+	region := ctx.Value(TraceRegionKey{}).(*trace.Region)
+	region.End()
+}
+
+func (t *pgxTracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceBatchStartData) context.Context {
+	region := trace.StartRegion(ctx, "pgx batch")
+	return context.WithValue(ctx, TraceRegionKey{}, region)
+}
+
+func (t *pgxTracer) TraceBatchEnd(ctx context.Context, conn *pgx.Conn, data pgx.TraceBatchEndData) {
+	region := ctx.Value(TraceRegionKey{}).(*trace.Region)
+	region.End()
+}
+
+func (t *pgxTracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceCopyFromStartData) context.Context {
+	region := trace.StartRegion(ctx, "pgx copy from")
+	return context.WithValue(ctx, TraceRegionKey{}, region)
+}
+
+func (t *pgxTracer) TraceCopyFromEnd(ctx context.Context, conn *pgx.Conn, data pgx.TraceCopyFromEndData) {
+	region := ctx.Value(TraceRegionKey{}).(*trace.Region)
+	region.End()
+}
+
+func (t *pgxTracer) TraceConnectStart(ctx context.Context, data pgx.TraceConnectStartData) context.Context {
+	region := trace.StartRegion(ctx, "pgx connect")
+	return context.WithValue(ctx, TraceRegionKey{}, region)
+}
+
+func (t *pgxTracer) TraceConnectEnd(ctx context.Context, data pgx.TraceConnectEndData) {
+	region := ctx.Value(TraceRegionKey{}).(*trace.Region)
+	region.End()
+}
+
+func (t *pgxTracer) TracePrepareStart(ctx context.Context, _ *pgx.Conn, data pgx.TracePrepareStartData) context.Context {
+	region := trace.StartRegion(ctx, "pgx prepare")
+	return context.WithValue(ctx, TraceRegionKey{}, region)
+}
+
+func (t *pgxTracer) TracePrepareEnd(ctx context.Context, conn *pgx.Conn, data pgx.TracePrepareEndData) {
+	region := ctx.Value(TraceRegionKey{}).(*trace.Region)
+	region.End()
 }

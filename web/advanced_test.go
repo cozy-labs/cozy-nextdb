@@ -1,14 +1,21 @@
 package web
 
-import "testing"
+import (
+	"context"
+	"runtime/trace"
+	"testing"
+)
 
 func TestAdvanced(t *testing.T) {
 	t.Parallel()
-	container := preparePG(t)
+	ctx := context.Background()
+	ctx, task := trace.NewTask(ctx, "TestAdvanced")
+	defer task.End()
+	container := preparePG(t, ctx)
 	logger := setupLogger(t)
 
 	t.Run("Mango", func(t *testing.T) {
-		e := launchTestServer(t, logger, connectToPG(t, container, logger))
+		e := launchTestServer(t, ctx, logger, connectToPG(t, container, logger))
 		e.PUT("/{db}").WithPath("db", "mango%2Fdoctype").
 			Expect().Status(201).
 			JSON().Object().HasValue("ok", true)
@@ -35,7 +42,7 @@ func TestAdvanced(t *testing.T) {
 
 		t.Run("Basic", func(t *testing.T) {
 			t.Parallel()
-			e := launchTestServer(t, logger, connectToPG(t, container, logger))
+			e := launchTestServer(t, ctx, logger, connectToPG(t, container, logger))
 
 			// Check errors
 			e.POST("/{db}/_find").WithPath("db", "mango%2Fdoctype").

@@ -5,6 +5,8 @@ nextdb.yaml
 nextdb.yml
 nextdb.json
 
+trace.out
+
 *.log
 *.key
 *.crt

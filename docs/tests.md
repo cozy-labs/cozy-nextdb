@@ -15,3 +15,13 @@ It is possible to see the SQL queries in the output by using the debug log level
 $ TEST_NEXTDB_LOG_LEVEL=debug go test ./web
 ```
 
+## Tracing
+
+It can be useful to know where the time is passed in order to optimize, and
+tracing is a tool that can help that. We can run the tests with golang tracing
+enabled, and then look at the trace in a browser:
+
+```sh
+$ go test ./web -trace=trace.out
+$ go tool trace trace.out
+```

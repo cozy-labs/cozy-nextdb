@@ -3,9 +3,11 @@ package web
 import (
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime/trace"
 	"strings"
 	"testing"
 	"time"
@@ -20,10 +22,11 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-func preparePG(t *testing.T) *postgres.PostgresContainer {
+func preparePG(t *testing.T, ctx context.Context) *postgres.PostgresContainer {
 	t.Helper()
+	region := trace.StartRegion(ctx, "preparePG")
+	defer region.End()
 
-	ctx := context.Background()
 	pg_image := os.Getenv("TEST_NEXTDB_PG_IMAGE")
 	if pg_image == "" {
 		pg_image = "docker.io/postgres:16-alpine"
@@ -80,11 +83,20 @@ func connectToPG(t *testing.T, container *postgres.PostgresContainer, logger *sl
 	return pg
 }
 
-func launchTestServer(t *testing.T, logger *slog.Logger, pg *pgxpool.Pool) *httpexpect.Expect {
+func launchTestServer(
+	t *testing.T,
+	ctx context.Context,
+	logger *slog.Logger,
+	pg *pgxpool.Pool,
+) *httpexpect.Expect {
 	t.Helper()
 
 	handler := Handler(&Server{Logger: logger, PG: pg})
-	ts := httptest.NewServer(handler)
+	ts := httptest.NewUnstartedServer(handler)
+	ts.Config.BaseContext = func(net.Listener) context.Context {
+		return ctx
+	}
+	ts.Start()
 	t.Cleanup(func() {
 		ts.Close()
 	})
@@ -100,17 +112,20 @@ func launchTestServer(t *testing.T, logger *slog.Logger, pg *pgxpool.Pool) *http
 
 func TestCommon(t *testing.T) {
 	t.Parallel()
-	container := preparePG(t)
+	ctx := context.Background()
+	ctx, task := trace.NewTask(ctx, "TestCommon")
+	defer task.End()
+	container := preparePG(t, ctx)
 	logger := setupLogger(t)
 
 	t.Run("Test the /status endpoint", func(t *testing.T) {
-		e := launchTestServer(t, logger, connectToPG(t, container, logger))
+		e := launchTestServer(t, ctx, logger, connectToPG(t, container, logger))
 		e.GET("/status").Expect().Status(200).
 			JSON().Object().HasValue("status", "OK")
 	})
 
 	t.Run("Test the PUT /:db endpoint", func(t *testing.T) {
-		e := launchTestServer(t, logger, connectToPG(t, container, logger))
+		e := launchTestServer(t, ctx, logger, connectToPG(t, container, logger))
 		e.PUT("/açétone").Expect().Status(400).
 			JSON().Object().HasValue("error", "illegal_database_name")
 		e.PUT("/aBCD").Expect().Status(400).
@@ -131,7 +146,7 @@ func TestCommon(t *testing.T) {
 	})
 
 	t.Run("Test the GET/HEAD /:db endpoint", func(t *testing.T) {
-		e := launchTestServer(t, logger, connectToPG(t, container, logger))
+		e := launchTestServer(t, ctx, logger, connectToPG(t, container, logger))
 		e.PUT("/{db}").WithPath("db", "cozydb%2Fdoctype").
 			Expect().Status(201).
 			JSON().Object().HasValue("ok", true)
@@ -148,7 +163,7 @@ func TestCommon(t *testing.T) {
 	})
 
 	t.Run("Test the DELETE /:db endpoint", func(t *testing.T) {
-		e := launchTestServer(t, logger, connectToPG(t, container, logger))
+		e := launchTestServer(t, ctx, logger, connectToPG(t, container, logger))
 		e.PUT("/delete_me").Expect().Status(201).
 			JSON().Object().HasValue("ok", true)
 		e.DELETE("/delete_me").Expect().Status(200).
