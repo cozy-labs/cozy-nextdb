@@ -21,11 +21,11 @@ func TestMango(t *testing.T) {
 		JSON().Object().HasValue("ok", true)
 	e.POST("/{db}").WithPath("db", db).
 		WithHeader("Content-Type", "application/json").
-		WithBytes([]byte(`{"_id": "foo", "value": "foo"}`)).
+		WithBytes([]byte(`{"_id": "foo", "value": "foo", "optional": true}`)).
 		Expect().Status(201)
 	e.POST("/{db}").WithPath("db", db).
 		WithHeader("Content-Type", "application/json").
-		WithBytes([]byte(`{"_id": "bar", "value": "bar"}`)).
+		WithBytes([]byte(`{"_id": "bar", "value": "bar", "optional": true}`)).
 		Expect().Status(201)
 	e.POST("/{db}").WithPath("db", db).
 		WithHeader("Content-Type", "application/json").
@@ -64,6 +64,39 @@ func TestMango(t *testing.T) {
 			doc.HasValue("_id", key)
 			doc.Value("_rev").String().NotEmpty()
 			doc.HasValue("value", key)
+		}
+	})
+
+	t.Run("Fields", func(t *testing.T) {
+		e := launchTestServer(t, ctx)
+
+		obj := e.POST("/{db}/_find").WithPath("db", db).
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(`{"selector": {}, "fields": ["value"]}`)).
+			Expect().Status(200).
+			JSON().Object()
+		docs := obj.Value("docs").Array()
+		docs.Length().IsEqual(5)
+		for i, key := range []string{"bar", "baz", "foo", "quux", "qux"} {
+			doc := docs.Value(i).Object()
+			doc.NotContainsKey("_id")
+			doc.NotContainsKey("_rev")
+			doc.NotContainsKey("optional")
+			doc.HasValue("value", key)
+		}
+
+		obj = e.POST("/{db}/_find").WithPath("db", db).
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(`{"selector": {}, "fields": ["_id", "_rev"]}`)).
+			Expect().Status(200).
+			JSON().Object()
+		docs = obj.Value("docs").Array()
+		docs.Length().IsEqual(5)
+		for i, key := range []string{"bar", "baz", "foo", "quux", "qux"} {
+			doc := docs.Value(i).Object()
+			doc.HasValue("_id", key)
+			doc.Value("_rev").String().NotEmpty()
+			doc.NotContainsKey("value")
 		}
 	})
 

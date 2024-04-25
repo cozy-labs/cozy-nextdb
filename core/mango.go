@@ -11,6 +11,7 @@ import (
 )
 
 type MangoParams struct {
+	Fields   []string
 	Selector map[string]any
 	Limit    int
 	Skip     int
@@ -22,7 +23,7 @@ type MangoResponse struct {
 }
 
 const FindMangoSQL = `
-SELECT blob
+SELECT %s
 FROM %s
 WHERE doctype = $1
 AND kind = '` + string(NormalDocKind) + `'
@@ -43,9 +44,14 @@ func (o *Operator) FindMango(databaseName string, params MangoParams) (*MangoRes
 		limit = 25
 	}
 
+	selected, err := mangoFieldsToSQL(params.Fields)
+	if err != nil {
+		return nil, err
+	}
+
 	response := &MangoResponse{}
 	err = o.ReadOnlyTx(func(tx pgx.Tx) error {
-		sql := fmt.Sprintf(FindMangoSQL, table)
+		sql := fmt.Sprintf(FindMangoSQL, selected, table)
 		sql = strings.ReplaceAll(sql, "\n", " ")
 		rows, err := tx.Query(o.Ctx, sql, doctype, limit, params.Skip)
 		if err != nil {
@@ -70,4 +76,23 @@ func (o *Operator) FindMango(databaseName string, params MangoParams) (*MangoRes
 		return nil
 	})
 	return response, err
+}
+
+func mangoFieldsToSQL(fields []string) (string, error) {
+	if len(fields) == 0 {
+		return "blob", nil
+	}
+
+	selected := "jsonb_build_object("
+	for i, field := range fields {
+		if strings.ContainsRune(field, '\'') {
+			return "", ErrBadRequest
+		}
+		if i > 0 {
+			selected += ", "
+		}
+		selected += fmt.Sprintf("'%s', blob ->> '%s'", field, field)
+	}
+	selected += ")"
+	return selected, nil
 }
