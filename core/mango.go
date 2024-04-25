@@ -11,8 +11,9 @@ import (
 )
 
 type MangoParams struct {
-	Fields   []string
 	Selector map[string]any
+	Fields   []string
+	Sort     []any
 	Limit    int
 	Skip     int
 }
@@ -27,7 +28,7 @@ SELECT %s
 FROM %s
 WHERE doctype = $1
 AND kind = '` + string(NormalDocKind) + `'
-ORDER BY row_id ASC
+ORDER BY %s
 LIMIT $2
 OFFSET $3
 ;
@@ -49,9 +50,14 @@ func (o *Operator) FindMango(databaseName string, params MangoParams) (*MangoRes
 		return nil, err
 	}
 
+	sort, err := mangoSortToSQL(params.Sort)
+	if err != nil {
+		return nil, err
+	}
+
 	response := &MangoResponse{}
 	err = o.ReadOnlyTx(func(tx pgx.Tx) error {
-		sql := fmt.Sprintf(FindMangoSQL, selected, table)
+		sql := fmt.Sprintf(FindMangoSQL, selected, table, sort)
 		sql = strings.ReplaceAll(sql, "\n", " ")
 		rows, err := tx.Query(o.Ctx, sql, doctype, limit, params.Skip)
 		if err != nil {
@@ -85,14 +91,60 @@ func mangoFieldsToSQL(fields []string) (string, error) {
 
 	selected := "jsonb_build_object("
 	for i, field := range fields {
-		if strings.ContainsRune(field, '\'') {
+		if field == "" || strings.ContainsRune(field, '\'') {
 			return "", ErrBadRequest
 		}
 		if i > 0 {
 			selected += ", "
 		}
 		selected += fmt.Sprintf("'%s', blob ->> '%s'", field, field)
+		// TODO should we use ->> or -> ?
+		// TODO nested fields like metadata.datetime
 	}
 	selected += ")"
 	return selected, nil
+}
+
+func mangoSortToSQL(sort []any) (string, error) {
+	if len(sort) == 0 {
+		return "row_id ASC", nil
+	}
+
+	orderBy := ""
+	for i, item := range sort {
+		field := ""
+		way := "ASC"
+		switch item := item.(type) {
+		case string:
+			field = item
+		case map[string]any:
+			if len(item) != 1 {
+				return "", ErrBadRequest
+			}
+			for k, v := range item {
+				field = k
+				w, ok := v.(string)
+				if !ok {
+					return "", ErrBadRequest
+				}
+				way = strings.ToUpper(w)
+			}
+		default:
+			return "", ErrBadRequest
+		}
+
+		if field == "" || strings.ContainsRune(field, '\'') {
+			return "", ErrBadRequest
+		}
+		if way != "ASC" && way != "DESC" {
+			return "", ErrBadRequest
+		}
+		if i > 0 {
+			orderBy += ", "
+		}
+		orderBy += fmt.Sprintf("blob ->> '%s' %s", field, way)
+		// TODO should we use ->> or -> ?
+		// TODO nested fields like metadata.datetime
+	}
+	return orderBy, nil
 }
