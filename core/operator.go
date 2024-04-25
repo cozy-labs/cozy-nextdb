@@ -108,7 +108,7 @@ func (o *Operator) CreateDatabase(databaseName string) error {
 	blob := map[string]any{"doc_count": 0}
 
 	// Happy path: we just insert the doctype
-	err = o.ReadWriteTx(func(tx pgx.Tx) error {
+	insertRows := func(tx pgx.Tx) error {
 		ok, err := o.ExecInsertRow(tx, table, doctype, DoctypeKind, doctype, blob)
 		if err != nil {
 			if pgErr, ok := err.(*pgconn.PgError); ok {
@@ -122,33 +122,25 @@ func (o *Operator) CreateDatabase(databaseName string) error {
 			return ErrInternalServerError
 		}
 		return nil
-	})
+	}
+	err = o.ReadWriteTx(insertRows)
 	if err == nil || err == ErrDatabaseExists {
 		return err
 	}
 
-	// Maybe we have to create the table before inserting the doctype
-	return o.ReadWriteTx(func(tx pgx.Tx) error {
-		if _, err := o.ExecCreateDocumentKind(tx); err != nil {
-			return err
-		}
-		if _, err = o.ExecCreateTable(tx, table); err != nil {
-			return err
-		}
-		ok, err := o.ExecInsertRow(tx, table, doctype, DoctypeKind, doctype, blob)
-		if err != nil {
-			if pgErr, ok := err.(*pgconn.PgError); ok {
-				if pgErr.Code == pgerrcode.UniqueViolation {
-					return ErrDatabaseExists
-				}
-			}
-			return err
-		}
-		if !ok {
-			return ErrInternalServerError
-		}
-		return nil
+	// We may have to create the table before inserting the doctype, and
+	// perhaps even if row_kind type. Errors are ignored for them, as we may
+	// have two concurrent HTTP requests for creating databases for the same
+	// Cozy, and only of one of them can create the type and the table.
+	_ = o.ReadWriteTx(func(tx pgx.Tx) error {
+		_, err := o.ExecCreateDocumentKind(tx)
+		return err
 	})
+	_ = o.ReadWriteTx(func(tx pgx.Tx) error {
+		_, err = o.ExecCreateTable(tx, table)
+		return err
+	})
+	return o.ReadWriteTx(insertRows)
 }
 
 func (o *Operator) DeleteDatabase(databaseName string) error {

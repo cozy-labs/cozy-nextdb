@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"runtime/trace"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,14 +18,55 @@ import (
 	"github.com/gavv/httpexpect/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lmittmann/tint"
-	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-func preparePG(t *testing.T, ctx context.Context) *postgres.PostgresContainer {
-	t.Helper()
+var logger *slog.Logger
+var pg *pgxpool.Pool
+
+func TestMain(m *testing.M) {
+	// XXX defer are not executed when os.Exit() is called, so we wrap the code
+	// in another function to be able to use defer.
+	os.Exit(runTests(m))
+}
+
+func runTests(m *testing.M) int {
+	ctx := context.Background()
+	ctx, task := trace.NewTask(ctx, "TestMain")
+	defer task.End()
+
+	logger = setupLogger()
+	container, err := preparePG(ctx)
+	if err != nil {
+		return -1
+	}
+	defer func() {
+		_ = container.Terminate(ctx)
+	}()
+
+	pg, err = connectToPG(ctx, container)
+	if err != nil {
+		return -1
+	}
+	defer pg.Close()
+
+	return m.Run()
+}
+
+func setupLogger() *slog.Logger {
+	opts := &tint.Options{
+		Level:      slog.LevelInfo,
+		TimeFormat: time.TimeOnly,
+	}
+	if os.Getenv("TEST_NEXTDB_LOG_LEVEL") == "debug" {
+		opts.Level = slog.LevelDebug
+	}
+	return slog.New(tint.NewHandler(os.Stderr, opts))
+}
+
+func preparePG(ctx context.Context) (*postgres.PostgresContainer, error) {
 	region := trace.StartRegion(ctx, "preparePG")
 	defer region.End()
 
@@ -40,55 +83,29 @@ func preparePG(t *testing.T, ctx context.Context) *postgres.PostgresContainer {
 			WithOccurrence(2).
 			WithStartupTimeout(5 * time.Second))
 	container, err := postgres.RunContainer(ctx, image, tmpfs, ready)
-	require.NoError(t, err, "Cannot run the postgres container")
-
-	err = container.Snapshot(ctx, postgres.WithSnapshotName("test-snapshot"))
-	require.NoError(t, err, "Cannot create a postgres snapshot")
-	t.Cleanup(func() {
-		require.NoError(t, container.Terminate(ctx), "failed to terminate container")
-	})
-
-	return container
+	if err != nil {
+		return nil, fmt.Errorf("cannot run the postgresql container: %w", err)
+	}
+	return container, nil
 }
 
-func setupLogger(t *testing.T) *slog.Logger {
-	t.Helper()
-
-	opts := &tint.Options{
-		Level:      slog.LevelInfo,
-		TimeFormat: time.TimeOnly,
-	}
-	if os.Getenv("TEST_NEXTDB_LOG_LEVEL") == "debug" {
-		opts.Level = slog.LevelDebug
-	}
-
-	return slog.New(tint.NewHandler(os.Stderr, opts))
-}
-
-func connectToPG(t *testing.T, container *postgres.PostgresContainer, logger *slog.Logger) *pgxpool.Pool {
-	t.Helper()
-
-	ctx := context.Background()
+func connectToPG(ctx context.Context, container *postgres.PostgresContainer) (*pgxpool.Pool, error) {
 	pgURL, err := container.ConnectionString(ctx)
-	require.NoError(t, err, "Cannot get connection string for PostgreSQL container")
+	if err != nil {
+		return nil, fmt.Errorf("cannot get connection string for PostgreSQL container: %w", err)
+	}
 	config, err := core.NewPgxConfig(pgURL, logger)
-	require.NoError(t, err, "Cannot parse config for pgxpool")
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse config for pgxpool: %w", err)
+	}
 	pg, err := pgxpool.NewWithConfig(ctx, config)
-	require.NoError(t, err, "Cannot create a pgxpool")
-	t.Cleanup(func() {
-		pg.Close()
-		require.NoError(t, container.Restore(ctx), "Cannot restore the container")
-	})
-
-	return pg
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse config for pgxpool: %w", err)
+	}
+	return pg, nil
 }
 
-func launchTestServer(
-	t *testing.T,
-	ctx context.Context,
-	logger *slog.Logger,
-	pg *pgxpool.Pool,
-) *httpexpect.Expect {
+func launchTestServer(t *testing.T, ctx context.Context) *httpexpect.Expect {
 	t.Helper()
 
 	handler := Handler(&Server{Logger: logger, PG: pg})
@@ -110,83 +127,28 @@ func launchTestServer(
 	})
 }
 
+var prefixCounter int32
+
+func getPrefix(s string) string {
+	n := atomic.AddInt32(&prefixCounter, 1)
+	return fmt.Sprintf("%s%d", s, n)
+}
+
+func getDatabase(prefix, doctype string) string {
+	escaped := strings.ReplaceAll(doctype, ".", "-")
+	return prefix + "%2F" + escaped
+}
+
 func TestCommon(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	ctx, task := trace.NewTask(ctx, "TestCommon")
 	defer task.End()
-	container := preparePG(t, ctx)
-	logger := setupLogger(t)
 
 	t.Run("Test the /status endpoint", func(t *testing.T) {
-		e := launchTestServer(t, ctx, logger, connectToPG(t, container, logger))
+		t.Parallel()
+		e := launchTestServer(t, ctx)
 		e.GET("/status").Expect().Status(200).
 			JSON().Object().HasValue("status", "OK")
-	})
-
-	t.Run("Test the PUT /:db endpoint", func(t *testing.T) {
-		e := launchTestServer(t, ctx, logger, connectToPG(t, container, logger))
-		e.PUT("/açétone").Expect().Status(400).
-			JSON().Object().HasValue("error", "illegal_database_name")
-		e.PUT("/aBCD").Expect().Status(400).
-			JSON().Object().HasValue("error", "illegal_database_name")
-		e.PUT("/_foo").Expect().Status(400).
-			JSON().Object().HasValue("error", "illegal_database_name")
-
-		e.PUT("/twice").Expect().Status(201).
-			JSON().Object().HasValue("ok", true)
-		e.PUT("/twice").Expect().Status(412).
-			JSON().Object().HasValue("error", "file_exists")
-		e.PUT("/{db}").WithPath("db", "prefix%2Fdoctype1").
-			Expect().Status(201).
-			JSON().Object().HasValue("ok", true)
-		e.PUT("/{db}").WithPath("db", "prefix%2Fdoctype2").
-			Expect().Status(201).
-			JSON().Object().HasValue("ok", true)
-	})
-
-	t.Run("Test the GET/HEAD /:db endpoint", func(t *testing.T) {
-		e := launchTestServer(t, ctx, logger, connectToPG(t, container, logger))
-		e.PUT("/{db}").WithPath("db", "cozydb%2Fdoctype").
-			Expect().Status(201).
-			JSON().Object().HasValue("ok", true)
-		e.HEAD("/{db}").WithPath("db", "cozydb%2Fdoctype").
-			Expect().Status(200)
-		e.GET("/{db}").WithPath("db", "cozydb%2Fdoctype").
-			Expect().Status(200).
-			JSON().Object().HasValue("doc_count", 0)
-
-		e.GET("/{db}").WithPath("db", "cozydb%2Fno_such_doctype").
-			Expect().Status(404)
-		e.GET("/{db}").WithPath("db", "no_such_prefix%2Fdoctype").
-			Expect().Status(404)
-	})
-
-	t.Run("Test the DELETE /:db endpoint", func(t *testing.T) {
-		e := launchTestServer(t, ctx, logger, connectToPG(t, container, logger))
-		e.PUT("/delete_me").Expect().Status(201).
-			JSON().Object().HasValue("ok", true)
-		e.DELETE("/delete_me").Expect().Status(200).
-			JSON().Object().HasValue("ok", true)
-		e.DELETE("/delete_me").Expect().Status(404).
-			JSON().Object().HasValue("error", "not_found")
-
-		e.PUT("/{db}").WithPath("db", "cozydelete%2Fdoctype1").
-			Expect().Status(201).
-			JSON().Object().HasValue("ok", true)
-		e.PUT("/{db}").WithPath("db", "cozydelete%2Fdoctype2").
-			Expect().Status(201).
-			JSON().Object().HasValue("ok", true)
-		e.DELETE("/{db}").WithPath("db", "cozydelete%2Fdoctype1").
-			Expect().Status(200).
-			JSON().Object().HasValue("ok", true)
-		e.GET("/{db}").WithPath("db", "cozydelete%2Fdoctype2").
-			Expect().Status(200).
-			JSON().Object().HasValue("doc_count", 0)
-		e.DELETE("/{db}").WithPath("db", "cozydelete%2Fdoctype2").
-			Expect().Status(200).
-			JSON().Object().HasValue("ok", true)
-		e.GET("/{db}").WithPath("db", "cozydelete%2Fdoctype2").
-			Expect().Status(404)
 	})
 }
