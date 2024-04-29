@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jackc/pgerrcode"
@@ -88,21 +89,76 @@ func mangoFieldsToSQL(fields []string) (string, error) {
 	if len(fields) == 0 {
 		return "blob", nil
 	}
-
-	selected := "jsonb_build_object("
-	for i, field := range fields {
-		if field == "" || strings.ContainsRune(field, '\'') {
-			return "", ErrBadRequest
-		}
-		if i > 0 {
-			selected += ", "
-		}
-		selected += fmt.Sprintf("'%s', blob ->> '%s'", field, field)
-		// TODO should we use ->> or -> ?
-		// TODO nested fields like metadata.datetime
+	sort.Strings(fields)
+	parsed, err := parseMangoFields(fields)
+	if err != nil {
+		return "", err
 	}
-	selected += ")"
-	return selected, nil
+	return parsed.toSQL(""), nil
+}
+
+func parseMangoFields(fields []string) (mangoField, error) {
+	var parsed mangoField
+	for _, field := range fields {
+		if field == "" || strings.ContainsRune(field, '\'') {
+			return parsed, ErrBadRequest
+		}
+		addFieldToMangoFields(&parsed, field)
+	}
+	return parsed, nil
+}
+
+func addFieldToMangoFields(ptr *mangoField, field string) {
+	parts := strings.Split(field, ".")
+	for _, part := range parts {
+		sub := findSubKey(ptr, part)
+		if sub != nil {
+			if len(sub.SubKeys) == 0 {
+				return
+			}
+			ptr = sub
+			continue
+		}
+
+		sub = &mangoField{Key: part}
+		ptr.SubKeys = append(ptr.SubKeys, sub)
+		ptr = sub
+	}
+}
+
+func findSubKey(ptr *mangoField, key string) *mangoField {
+	for _, sub := range ptr.SubKeys {
+		if sub.Key == key {
+			return sub
+		}
+	}
+	return nil
+}
+
+type mangoField struct {
+	Key     string
+	SubKeys []*mangoField
+}
+
+func (f *mangoField) toSQL(path string) string {
+	sql := "jsonb_build_object("
+	for i, sub := range f.SubKeys {
+		if i > 0 {
+			sql += ", "
+		}
+		value := ""
+		switch {
+		case len(sub.SubKeys) > 0:
+			value = sub.toSQL(path + sub.Key + ",")
+		case path == "":
+			value = fmt.Sprintf("blob -> '%s'", sub.Key)
+		default:
+			value = fmt.Sprintf("blob #> '{%s%s}'", path, sub.Key)
+		}
+		sql += fmt.Sprintf("'%s', %s", sub.Key, value)
+	}
+	sql += ")"
+	return sql
 }
 
 func mangoSortToSQL(sort []any) (string, error) {
@@ -142,9 +198,12 @@ func mangoSortToSQL(sort []any) (string, error) {
 		if i > 0 {
 			orderBy += ", "
 		}
-		orderBy += fmt.Sprintf("blob ->> '%s' %s", field, way)
-		// TODO should we use ->> or -> ?
-		// TODO nested fields like metadata.datetime
+		if strings.Contains(field, ".") {
+			replaced := strings.ReplaceAll(field, ".", ",")
+			orderBy += fmt.Sprintf("blob #> '{%s}' %s", replaced, way)
+		} else {
+			orderBy += fmt.Sprintf("blob -> '%s' %s", field, way)
+		}
 	}
 	return orderBy, nil
 }

@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"runtime/trace"
+	"strings"
 	"testing"
 )
 
@@ -21,23 +22,23 @@ func TestMango(t *testing.T) {
 		JSON().Object().HasValue("ok", true)
 	e.POST("/{db}").WithPath("db", db).
 		WithHeader("Content-Type", "application/json").
-		WithBytes([]byte(`{"_id": "foo", "value": "foo", "note": 3, "optional": true}`)).
+		WithBytes([]byte(`{"_id": "foo", "value": "foo", "note": 7, "optional": true}`)).
 		Expect().Status(201)
 	e.POST("/{db}").WithPath("db", db).
 		WithHeader("Content-Type", "application/json").
-		WithBytes([]byte(`{"_id": "bar", "value": "bar", "note": 4, "optional": true}`)).
+		WithBytes([]byte(`{"_id": "bar", "value": "bar", "note": 10, "optional": true}`)).
 		Expect().Status(201)
 	e.POST("/{db}").WithPath("db", db).
 		WithHeader("Content-Type", "application/json").
-		WithBytes([]byte(`{"_id": "baz", "value": "baz", "note": 3}`)).
+		WithBytes([]byte(`{"_id": "baz", "value": "baz", "note": 7}`)).
 		Expect().Status(201)
 	e.POST("/{db}").WithPath("db", db).
 		WithHeader("Content-Type", "application/json").
-		WithBytes([]byte(`{"_id": "qux", "value": "qux", "note": 1}`)).
+		WithBytes([]byte(`{"_id": "qux", "value": "qux", "note": 2, "nested": {"q": 1, "u": 1, "x": 1}}`)).
 		Expect().Status(201)
 	e.POST("/{db}").WithPath("db", db).
 		WithHeader("Content-Type", "application/json").
-		WithBytes([]byte(`{"_id": "quux", "value": "quux", "note": 2}`)).
+		WithBytes([]byte(`{"_id": "quux", "value": "quux", "note": 2, "nested": {"q": 1, "u": 2, "x": 1}}`)).
 		Expect().Status(201)
 
 	t.Run("Basic", func(t *testing.T) {
@@ -98,6 +99,26 @@ func TestMango(t *testing.T) {
 			doc.Value("_rev").String().NotEmpty()
 			doc.NotContainsKey("value")
 		}
+
+		obj = e.POST("/{db}/_find").WithPath("db", db).
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(`{"selector": {}, "fields": ["nested.u", "nested.x"]}`)).
+			Expect().Status(200).
+			JSON().Object()
+		docs = obj.Value("docs").Array()
+		docs.Length().IsEqual(5)
+		for i, key := range []string{"bar", "baz", "foo", "quux", "qux"} {
+			doc := docs.Value(i).Object()
+			doc.NotContainsKey("_id")
+			doc.NotContainsKey("_rev")
+			if key == "qux" || key == "quux" {
+				nested := doc.Value("nested").Object()
+				nested.NotContainsKey("q")
+				nbU := len(strings.Split(key, "u")) - 1
+				nested.HasValue("u", nbU)
+				nested.HasValue("x", 1)
+			}
+		}
 	})
 
 	t.Run("Sort", func(t *testing.T) {
@@ -110,7 +131,7 @@ func TestMango(t *testing.T) {
 			JSON().Object()
 		docs := obj.Value("docs").Array()
 		docs.Length().IsEqual(5)
-		for i, key := range []string{"qux", "quux", "baz", "foo", "bar"} {
+		for i, key := range []string{"quux", "qux", "baz", "foo", "bar"} {
 			doc := docs.Value(i).Object()
 			doc.HasValue("_id", key)
 			doc.Value("_rev").String().NotEmpty()
@@ -119,7 +140,7 @@ func TestMango(t *testing.T) {
 
 		obj = e.POST("/{db}/_find").WithPath("db", db).
 			WithHeader("Content-Type", "application/json").
-			WithBytes([]byte(`{"selector": {}, "sort": [{"note": "desc"}, {"_id": "desc"}]}`)).
+			WithBytes([]byte(`{"selector": {}, "sort": [{"note": "desc"}, {"nested.u": "desc"}, {"_id": "desc"}]}`)).
 			Expect().Status(200).
 			JSON().Object()
 		docs = obj.Value("docs").Array()

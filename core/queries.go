@@ -241,7 +241,7 @@ func (o *Operator) ExecDropTable(tx pgx.Tx, tableName string) error {
 
 const IncrementDocCountSQL = `
 UPDATE %s
-SET blob = jsonb_set(blob, '{doc_count}', ((blob ->> 'doc_count')::int %c 1)::text::jsonb)
+SET blob = jsonb_set(blob, '{doc_count}', ((blob -> 'doc_count')::int %c 1)::text::jsonb)
 WHERE kind = '` + string(DoctypeKind) + `'
 AND row_id = $1
 AND doctype = $1
