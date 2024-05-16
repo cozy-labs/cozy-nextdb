@@ -44,7 +44,7 @@ lint: scripts/golangci-lint
 .PHONY: lint
 
 scripts/golangci-lint: Makefile
-> @curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./scripts v1.55.0
+> @curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./scripts v1.58.1
 
 ## cli: build the CLI documentation and shell completions
 cli: install
