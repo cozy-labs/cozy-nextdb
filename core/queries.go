@@ -185,6 +185,35 @@ func (o *Operator) ExecGetAllDocs(tx pgx.Tx, tableName, doctype string, params A
 	})
 }
 
+const GetAllDoctypesSQL = `
+SELECT doctype
+FROM %s
+WHERE kind = '` + string(DoctypeKind) + `'
+ORDER BY doctype %s
+LIMIT %v
+OFFSET $1
+;
+`
+
+func (o *Operator) ExecGetAllDoctypes(tx pgx.Tx, tableName string, params AllDocsParams) ([]string, error) {
+	var limit any = "All"
+	if params.Limit > 0 {
+		limit = params.Limit
+	}
+	order := "ASC"
+	if params.Descending {
+		order = "DESC"
+	}
+
+	sql := fmt.Sprintf(GetAllDoctypesSQL, tableName, order, limit)
+	sql = strings.ReplaceAll(sql, "\n", " ")
+	rows, err := tx.Query(o.Ctx, sql, params.Skip)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
 const DeleteDoctypeSQL = `
 DELETE FROM %s
 WHERE doctype = $1

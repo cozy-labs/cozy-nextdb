@@ -87,4 +87,25 @@ func TestDatabase(t *testing.T) {
 		e.GET("/{db}").WithPath("db", db2).
 			Expect().Status(404)
 	})
+
+	t.Run("Test the GET /_all_dbs endpoint", func(t *testing.T) {
+		e := launchTestServer(t, ctx)
+
+		prefix := getPrefix("database")
+		db1 := getDatabase(prefix, "doctype1")
+		db2 := getDatabase(prefix, "doctype2")
+		e.PUT("/{db}").WithPath("db", db1).
+			Expect().Status(201).
+			JSON().Object().HasValue("ok", true)
+		e.PUT("/{db}").WithPath("db", db2).
+			Expect().Status(201).
+			JSON().Object().HasValue("ok", true)
+		e.GET("/_all_dbs").
+			WithQuery("start_key", `"`+prefix+`/"`).
+			WithQuery("end_key", `"`+prefix+`0"`).
+			Expect().Status(200).
+			JSON().Array().IsEqual([]string{prefix + "/doctype1", prefix + "/doctype2"})
+
+		e.GET("/_all_dbs").Expect().Status(501)
+	})
 }

@@ -238,7 +238,6 @@ func (o *Operator) PutDocument(databaseName, docID, currentRev string, r io.Read
 	if rev != "" {
 		gen = ExtractGeneration(rev)
 		if gen <= 0 {
-			fmt.Printf("\n\n*** gen=%d rev=%s\n\n", gen, rev)
 			return nil, ErrConflict
 		}
 	}

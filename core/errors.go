@@ -11,4 +11,6 @@ var (
 	ErrIllegalDatabaseName = errors.New("illegal_database_name")
 	ErrDatabaseExists      = errors.New("file_exists")
 	ErrDeleted             = errors.New("deleted")
+
+	ErrNotImplemented = errors.New("not_implemented")
 )

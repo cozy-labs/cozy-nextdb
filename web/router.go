@@ -137,6 +137,7 @@ func Handler(s *Server) *echo.Echo {
 	e.GET("/status", s.Status)
 	e.HEAD("/status", s.Status)
 
+	e.GET("/_all_dbs", s.GetAllDatabases)
 	e.GET("/:db", s.GetDatabase)
 	e.HEAD("/:db", s.GetDatabase)
 	e.PUT("/:db", s.CreateDatabase)
@@ -162,6 +163,94 @@ func newOperator(s *Server, c echo.Context) *core.Operator {
 		PG:     s.PG,
 		Logger: logger,
 		Ctx:    ctx,
+	}
+}
+
+// GetAllDatabases is the handler for GET /_all_dbs. It returns the list of the
+// databases.
+func (s *Server) GetAllDatabases(c echo.Context) error {
+	op := newOperator(s, c)
+	params := core.AllDocsParams{
+		Descending: c.QueryParam("descending") == "true",
+	}
+	var key string
+	if startKey := c.QueryParam("startkey"); startKey != "" {
+		if err := json.Unmarshal([]byte(startKey), &key); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]any{
+				"error":  "bad_request",
+				"reason": err.Error(),
+			})
+		}
+		params.StartKey = key
+	}
+	if startKey := c.QueryParam("start_key"); startKey != "" {
+		if err := json.Unmarshal([]byte(startKey), &key); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]any{
+				"error":  "bad_request",
+				"reason": err.Error(),
+			})
+		}
+		params.StartKey = key
+	}
+	if endKey := c.QueryParam("endkey"); endKey != "" {
+		if err := json.Unmarshal([]byte(endKey), &key); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]any{
+				"error":  "bad_request",
+				"reason": err.Error(),
+			})
+		}
+		params.EndKey = key
+	}
+	if endKey := c.QueryParam("end_key"); endKey != "" {
+		if err := json.Unmarshal([]byte(endKey), &key); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]any{
+				"error":  "bad_request",
+				"reason": err.Error(),
+			})
+		}
+		params.EndKey = key
+	}
+	if limit := c.QueryParam("limit"); limit != "" {
+		nb, err := strconv.Atoi(limit)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]any{
+				"error":  "query_parse_error",
+				"reason": err.Error(),
+			})
+		}
+		params.Limit = nb
+	}
+	if skip := c.QueryParam("skip"); skip != "" {
+		nb, err := strconv.Atoi(skip)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]any{
+				"error":  "query_parse_error",
+				"reason": err.Error(),
+			})
+		}
+		params.Skip = nb
+	}
+
+	result, err := op.GetAllDatabases(params)
+	switch {
+	case err == nil:
+		return c.JSON(http.StatusOK, result)
+	case errors.Is(err, core.ErrNotFound):
+		return c.JSON(http.StatusNotFound, map[string]any{
+			"error":  err.Error(),
+			"reason": "missing",
+		})
+	case errors.Is(err, core.ErrNotImplemented):
+		return c.JSON(http.StatusNotImplemented, map[string]any{
+			"error":  "not_implemented",
+			"reason": err.Error(),
+		})
+	default:
+		op.Logger.With(slog.Any("error", err.Error())).Error("internal_server_error")
+		return c.JSON(http.StatusInternalServerError, map[string]any{
+			"error":  "internal_server_error",
+			"reason": err.Error(),
+		})
 	}
 }
 

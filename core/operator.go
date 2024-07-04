@@ -173,3 +173,27 @@ func (o *Operator) DeleteDatabase(databaseName string) error {
 		return nil
 	})
 }
+
+func (o *Operator) GetAllDatabases(params AllDocsParams) ([]string, error) {
+	parts := strings.Split(params.StartKey, "/")
+	table := parts[0]
+	if table == "" {
+		return nil, ErrNotImplemented
+	}
+	if !strings.HasPrefix(params.EndKey, table) {
+		return nil, ErrNotImplemented
+	}
+
+	var dbs []string
+	err := o.ReadWriteTx(func(tx pgx.Tx) error {
+		doctypes, err := o.ExecGetAllDoctypes(tx, table, params)
+		if err != nil {
+			return err
+		}
+		for _, doctype := range doctypes {
+			dbs = append(dbs, table+"/"+doctype)
+		}
+		return nil
+	})
+	return dbs, err
+}
