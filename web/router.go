@@ -144,6 +144,7 @@ func Handler(s *Server) *echo.Echo {
 	e.DELETE("/:db", s.DeleteDatabase)
 
 	e.GET("/:db/_all_docs", s.GetAllDocs)
+	e.GET("/:db/_changes", s.GetChanges)
 	e.POST("/:db", s.CreateDocument)
 	e.GET("/:db/:docid", s.GetDocument)
 	e.HEAD("/:db/:docid", s.GetDocument)
@@ -393,6 +394,43 @@ func (s *Server) GetAllDocs(c echo.Context) error {
 	}
 
 	result, err := op.GetAllDocs(c.Param("db"), params)
+	switch {
+	case err == nil:
+		return c.JSON(http.StatusOK, result)
+	case errors.Is(err, core.ErrNotFound):
+		return c.JSON(http.StatusNotFound, map[string]any{
+			"error":  err.Error(),
+			"reason": "missing",
+		})
+	default:
+		op.Logger.With(slog.Any("error", err.Error())).Error("internal_server_error")
+		return c.JSON(http.StatusInternalServerError, map[string]any{
+			"error":  "internal_server_error",
+			"reason": err.Error(),
+		})
+	}
+}
+
+// GetChanges is the handler for GET /:db/_changes. It returns a sorted list of
+// changes made to documents in the database.
+func (s *Server) GetChanges(c echo.Context) error {
+	op := newOperator(s, c)
+	params := core.ChangesParams{
+		Limit: -1,
+		Since: c.QueryParam("since"),
+	}
+	if limit := c.QueryParam("limit"); limit != "" {
+		nb, err := strconv.Atoi(limit)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]any{
+				"error":  "query_parse_error",
+				"reason": err.Error(),
+			})
+		}
+		params.Limit = nb
+	}
+
+	result, err := op.GetChanges(c.Param("db"), params)
 	switch {
 	case err == nil:
 		return c.JSON(http.StatusOK, result)

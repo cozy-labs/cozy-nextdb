@@ -48,7 +48,7 @@ CREATE TABLE %s (
   kind    row_kind,
   blob    JSONB,
   PRIMARY KEY (doctype, kind, row_id)
-);
+)
 `
 
 func (o *Operator) ExecCreateTable(tx pgx.Tx, tableName string) (pgconn.CommandTag, error) {
@@ -59,7 +59,7 @@ func (o *Operator) ExecCreateTable(tx pgx.Tx, tableName string) (pgconn.CommandT
 
 const InsertRowSQL = `
 INSERT INTO %s(doctype, row_id, kind, blob)
-VALUES ($1, $2, '%s', $3);
+VALUES ($1, $2, '%s', $3)
 `
 
 func (o *Operator) ExecInsertRow(tx pgx.Tx, tableName, doctype string, kind RowKind, id string, blob any) (bool, error) {
@@ -77,7 +77,7 @@ SELECT blob
 FROM %s
 WHERE doctype = $1
 AND row_id = $2
-AND kind = '%s';
+AND kind = '%s'
 `
 
 func (o *Operator) ExecGetRow(tx pgx.Tx, tableName, doctype string, kind RowKind, id string, blob any) error {
@@ -92,7 +92,7 @@ SET blob = $1
 WHERE kind = '%s'
 AND doctype = $2
 AND row_id = $3
-AND blob ->> '_rev' = $4;
+AND blob ->> '_rev' = $4
 `
 
 func (o *Operator) ExecUpdateDocument(tx pgx.Tx, tableName, doctype string, kind RowKind, docID, rev string, blob any) (bool, error) {
@@ -127,7 +127,7 @@ const DeleteRowSQL = `
 DELETE FROM %s
 WHERE doctype = $1
 AND row_id = $2
-AND kind = '%s';
+AND kind = '%s'
 `
 
 func (o *Operator) ExecDeleteRow(tx pgx.Tx, tableName, doctype string, kind RowKind, id string) (bool, error) {
@@ -150,7 +150,6 @@ AND row_id <= $3
 ORDER BY row_id %s
 LIMIT %v
 OFFSET $4
-;
 `
 
 func (o *Operator) ExecGetAllDocs(tx pgx.Tx, tableName, doctype string, params AllDocsParams) ([]map[string]any, error) {
@@ -192,7 +191,6 @@ WHERE kind = '` + string(DoctypeKind) + `'
 ORDER BY doctype %s
 LIMIT %v
 OFFSET $1
-;
 `
 
 func (o *Operator) ExecGetAllDoctypes(tx pgx.Tx, tableName string, params AllDocsParams) ([]string, error) {
@@ -214,6 +212,57 @@ func (o *Operator) ExecGetAllDoctypes(tx pgx.Tx, tableName string, params AllDoc
 	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
+const GetChangesSQL = `
+SELECT row_id, blob
+FROM %s
+WHERE doctype = $1
+AND kind = '` + string(ChangeKind) + `'
+AND row_id > $2
+ORDER BY row_id ASC
+LIMIT %v
+`
+
+type changeRow struct {
+	Seq  string
+	Blob map[string]any
+}
+
+func (o *Operator) ExecGetChanges(tx pgx.Tx, tableName, doctype string, params ChangesParams) ([]changeRow, error) {
+	var limit any = "All"
+	if params.Limit >= 0 {
+		limit = params.Limit
+	}
+
+	sql := fmt.Sprintf(GetChangesSQL, tableName, limit)
+	sql = strings.ReplaceAll(sql, "\n", " ")
+	rows, err := tx.Query(o.Ctx, sql, doctype, params.Since)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (changeRow, error) {
+		var change changeRow
+		err := row.Scan(&change.Seq, &change.Blob)
+		return change, err
+	})
+}
+
+const CountPendingChangesSQL = `
+SELECT COUNT(row_id)
+FROM %s
+WHERE doctype = $1
+AND kind = '` + string(ChangeKind) + `'
+AND row_id > $2
+GROUP BY doctype
+`
+
+func (o *Operator) ExecCountPendingChanges(tx pgx.Tx, tableName, doctype, seq string) (int, error) {
+	sql := fmt.Sprintf(CountPendingChangesSQL, tableName)
+	sql = strings.ReplaceAll(sql, "\n", " ")
+	var count int
+	err := tx.QueryRow(o.Ctx, sql, doctype, seq).Scan(&count)
+	return count, err
+}
+
 const DeleteDoctypeSQL = `
 DELETE FROM %s
 WHERE doctype = $1
@@ -233,7 +282,7 @@ const CheckDoctypeExistsSQL = `
 SELECT 1
 FROM %s
 WHERE doctype = $1
-AND kind = 'doctype';
+AND kind = 'doctype'
 LIMIT 1
 `
 
@@ -246,7 +295,7 @@ func (o *Operator) ExecCheckDoctypeExists(tx pgx.Tx, tableName, doctype string) 
 }
 
 const CheckTableIsEmptySQL = `
-SELECT NOT EXISTS (SELECT 1 FROM %s) AS is_empty;
+SELECT NOT EXISTS (SELECT 1 FROM %s) AS is_empty
 `
 
 func (o *Operator) ExecCheckTableIsEmpty(tx pgx.Tx, tableName string) (bool, error) {
@@ -258,7 +307,7 @@ func (o *Operator) ExecCheckTableIsEmpty(tx pgx.Tx, tableName string) (bool, err
 }
 
 const DropTableSQL = `
-DROP TABLE %s;
+DROP TABLE %s
 `
 
 func (o *Operator) ExecDropTable(tx pgx.Tx, tableName string) error {
@@ -270,24 +319,67 @@ func (o *Operator) ExecDropTable(tx pgx.Tx, tableName string) error {
 
 const IncrementDocCountSQL = `
 UPDATE %s
-SET blob = jsonb_set(blob, '{doc_count}', ((blob -> 'doc_count')::int %c 1)::text::jsonb)
+SET blob = blob || jsonb_build_object(
+      'doc_count', (blob -> 'doc_count')::int %c 1,
+      'last_seq', (blob -> 'last_seq')::int + 1)
 WHERE kind = '` + string(DoctypeKind) + `'
 AND row_id = $1
 AND doctype = $1
+RETURNING blob -> 'last_seq'
 `
 
-func (o *Operator) ExecIncrementDocCount(tx pgx.Tx, tableName, doctype string) (bool, error) {
+func (o *Operator) ExecIncrementDocCount(tx pgx.Tx, tableName, doctype string) (int64, error) {
+	var lastSeq int64
 	sql := fmt.Sprintf(IncrementDocCountSQL, tableName, '+')
 	sql = strings.ReplaceAll(sql, "\n", " ")
-	tag, err := tx.Exec(o.Ctx, sql, doctype)
+	err := tx.QueryRow(o.Ctx, sql, doctype).Scan(&lastSeq)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
-	return tag.RowsAffected() == 1, nil
+	return lastSeq, nil
 }
 
-func (o *Operator) ExecDecrementDocCount(tx pgx.Tx, tableName, doctype string) (bool, error) {
+func (o *Operator) ExecDecrementDocCount(tx pgx.Tx, tableName, doctype string) (int64, error) {
+	var lastSeq int64
 	sql := fmt.Sprintf(IncrementDocCountSQL, tableName, '-')
+	sql = strings.ReplaceAll(sql, "\n", " ")
+	err := tx.QueryRow(o.Ctx, sql, doctype).Scan(&lastSeq)
+	if err != nil {
+		return 0, err
+	}
+	return lastSeq, nil
+}
+
+const IncrementLastSeqSQL = `
+UPDATE %s
+SET blob = blob || jsonb_build_object(
+      'last_seq', (blob -> 'last_seq')::int + 1)
+WHERE kind = '` + string(DoctypeKind) + `'
+AND row_id = $1
+AND doctype = $1
+RETURNING blob -> 'last_seq'
+`
+
+func (o *Operator) ExecIncrementLastSeq(tx pgx.Tx, tableName, doctype string) (int64, error) {
+	var lastSeq int64
+	sql := fmt.Sprintf(IncrementLastSeqSQL, tableName)
+	sql = strings.ReplaceAll(sql, "\n", " ")
+	err := tx.QueryRow(o.Ctx, sql, doctype).Scan(&lastSeq)
+	if err != nil {
+		return 0, err
+	}
+	return lastSeq, nil
+}
+
+const DeleteChangeForDocumentSQL = `
+DELETE FROM %s
+WHERE doctype = $1
+AND kind = '` + string(ChangeKind) + `'
+AND blob @> '{"id": "%s"}'::jsonb
+`
+
+func (o *Operator) ExecDeleteChangeForDocument(tx pgx.Tx, tableName, doctype, docID string) (bool, error) {
+	sql := fmt.Sprintf(DeleteChangeForDocumentSQL, tableName, docID)
 	sql = strings.ReplaceAll(sql, "\n", " ")
 	tag, err := tx.Exec(o.Ctx, sql, doctype)
 	if err != nil {

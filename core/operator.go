@@ -105,7 +105,7 @@ func (o *Operator) CreateDatabase(databaseName string) error {
 	if first := databaseName[0]; first < 'a' || first > 'z' {
 		return ErrIllegalDatabaseName
 	}
-	blob := map[string]any{"doc_count": 0}
+	blob := map[string]any{"doc_count": 0, "last_seq": 0}
 
 	// Happy path: we just insert the doctype
 	insertRows := func(tx pgx.Tx) error {

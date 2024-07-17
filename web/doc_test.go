@@ -2,9 +2,12 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"runtime/trace"
 	"strings"
 	"testing"
+
+	"github.com/gavv/httpexpect/v2"
 )
 
 func TestDoc(t *testing.T) {
@@ -380,6 +383,121 @@ func TestDoc(t *testing.T) {
 		rows.Length().IsEqual(3)
 		for i, key := range []string{"quux", "foo", "baz"} {
 			rows.Value(i).Object().HasValue("id", key)
+		}
+	})
+
+	t.Run("Test the GET /:db/_changes endpoint", func(t *testing.T) {
+		e := launchTestServer(t, ctx)
+		prefix := getPrefix("doc")
+		db1 := getDatabase(prefix, "doctype1")
+
+		e.PUT("/{db}").WithPath("db", db1).
+			Expect().Status(201).
+			JSON().Object().HasValue("ok", true)
+
+		// Create a deleted document...
+		e.POST("/{db}").WithPath("db", db1).
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(`{"_deleted": true}`)).
+			Expect().Status(201)
+
+		// ...a document with multiple revisions,
+		obj1 := e.PUT("/{db}/doc1").WithPath("db", db1).
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(`{"foo": "bar"}`)).
+			Expect().Status(201).
+			JSON().Object()
+		rev1 := obj1.Value("rev").String().NotEmpty().HasPrefix("1-").Raw()
+		e.PUT("/{db}/doc1").WithPath("db", db1).
+			WithQuery("rev", rev1).
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(`{"foo": "baz"}`)).
+			Expect().Status(201).
+			JSON().Object()
+
+		// ...a document that is then deleted
+		obj2 := e.PUT("/{db}/doc2").WithPath("db", db1).
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(`{"foo": "bar"}`)).
+			Expect().Status(201).
+			JSON().Object()
+		rev2 := obj2.Value("rev").String().NotEmpty().HasPrefix("1-").Raw()
+		e.DELETE("/{db}/doc2").WithPath("db", db1).
+			WithQuery("rev", rev2).
+			Expect().Status(200).
+			JSON().Object()
+
+		// and 10 other normal documents
+		for i := 0; i < 10; i++ {
+			e.POST("/{db}").WithPath("db", db1).
+				WithHeader("Content-Type", "application/json").
+				WithBytes([]byte(fmt.Sprintf(`{"nb": %d}`, i))).
+				Expect().Status(201)
+		}
+
+		// An helper
+		hasASingleChange := func(result *httpexpect.Object) {
+			changes := result.Value("changes").Array()
+			changes.Length().IsEqual(1)
+			changes.Value(0).Object().Value("rev").String().NotEmpty()
+		}
+
+		// Test no parameters
+		obj := e.GET("/{db}/_changes").WithPath("db", db1).
+			Expect().Status(200).
+			JSON().Object()
+		obj.HasValue("pending", 0)
+		obj.Value("last_seq").String().NotEmpty().HasPrefix("15-")
+		results := obj.Value("results").Array()
+		results.Length().IsEqual(13)
+
+		first := results.Value(0).Object()
+		first.HasValue("deleted", true)
+		first.Value("id").String().NotEmpty()
+		first.Value("seq").String().NotEmpty().HasPrefix("1-")
+		hasASingleChange(first)
+
+		second := results.Value(1).Object()
+		second.HasValue("id", "doc1")
+		second.Value("seq").String().NotEmpty().HasPrefix("3-")
+		hasASingleChange(second)
+
+		third := results.Value(2).Object()
+		third.HasValue("id", "doc2")
+		third.Value("seq").String().NotEmpty().HasPrefix("5-")
+		hasASingleChange(third)
+
+		for i := 0; i < 10; i++ {
+			result := results.Value(3 + i).Object()
+			result.Value("id").String().NotEmpty()
+			result.Value("seq").String().NotEmpty().HasPrefix(fmt.Sprintf("%d-", 6+i))
+			hasASingleChange(result)
+		}
+
+		// Test limit parameter
+		obj = e.GET("/{db}/_changes").WithPath("db", db1).
+			WithQuery("limit", "3").
+			Expect().Status(200).
+			JSON().Object()
+		obj.HasValue("pending", 10)
+		since := obj.Value("last_seq").String().NotEmpty().HasPrefix("5-").Raw()
+		results = obj.Value("results").Array()
+		results.Length().IsEqual(3)
+		results.Value(0).Object().Value("seq").String().HasPrefix("1-")
+		results.Value(1).Object().Value("seq").String().HasPrefix("3-")
+		results.Value(2).Object().Value("seq").String().HasPrefix("5-")
+
+		// Test since parameter
+		obj = e.GET("/{db}/_changes").WithPath("db", db1).
+			WithQuery("since", since).
+			Expect().Status(200).
+			JSON().Object()
+		obj.HasValue("pending", 0)
+		obj.Value("last_seq").String().NotEmpty().HasPrefix("15-").Raw()
+		results = obj.Value("results").Array()
+		results.Length().IsEqual(10)
+		for i := 0; i < 10; i++ {
+			results.Value(i).Object().Value("seq").String().HasPrefix(fmt.Sprintf("%d-", 6+i))
 		}
 	})
 }
