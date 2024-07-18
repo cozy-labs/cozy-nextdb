@@ -143,6 +143,8 @@ func Handler(s *Server) *echo.Echo {
 	e.PUT("/:db", s.CreateDatabase)
 	e.DELETE("/:db", s.DeleteDatabase)
 
+	e.PUT("/:db/_design/:ddoc", s.CreateDesignDoc)
+
 	e.GET("/:db/_all_docs", s.GetAllDocs)
 	e.GET("/:db/_changes", s.GetChanges)
 	e.POST("/:db", s.CreateDocument)
@@ -316,6 +318,43 @@ func (s *Server) DeleteDatabase(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]any{
 			"error":  err.Error(),
 			"reason": "Database does not exist.",
+		})
+	default:
+		op.Logger.With(slog.Any("error", err.Error())).Error("internal_server_error")
+		return c.JSON(http.StatusInternalServerError, map[string]any{
+			"error":  "internal_server_error",
+			"reason": err.Error(),
+		})
+	}
+}
+
+// CreateDesignDoc is the handler for PUT /:db/_design/:ddoc. It creates a
+// design document in the given database (ie a view or a mango index).
+func (s *Server) CreateDesignDoc(c echo.Context) error {
+	op := newOperator(s, c)
+	docID := "_design/" + c.Param("ddoc")
+	doc, err := op.CreateDesignDoc(c.Param("db"), docID, c.Request().Body)
+	switch {
+	case err == nil:
+		return c.JSON(http.StatusCreated, map[string]any{
+			"ok":  true,
+			"id":  doc["_id"],
+			"rev": doc["_rev"],
+		})
+	case errors.Is(err, core.ErrBadRequest):
+		return c.JSON(http.StatusBadRequest, map[string]any{
+			"error":  err.Error(),
+			"reason": "invalid UTF-8 JSON",
+		})
+	case errors.Is(err, core.ErrNotFound):
+		return c.JSON(http.StatusNotFound, map[string]any{
+			"error":  err.Error(),
+			"reason": "Database does not exist.",
+		})
+	case errors.Is(err, core.ErrConflict):
+		return c.JSON(http.StatusConflict, map[string]any{
+			"error":  err.Error(),
+			"reason": "Document update conflict.",
 		})
 	default:
 		op.Logger.With(slog.Any("error", err.Error())).Error("internal_server_error")
