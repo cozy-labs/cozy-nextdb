@@ -57,6 +57,16 @@ func (o *Operator) ExecCreateTable(tx pgx.Tx, tableName string) (pgconn.CommandT
 	return tx.Exec(o.Ctx, sql)
 }
 
+const AddGinIndexSQL = `
+CREATE INDEX %s_gin ON %s USING gin (blob)
+`
+
+func (o *Operator) ExecAddGinIndex(tx pgx.Tx, tableName string) (pgconn.CommandTag, error) {
+	sql := fmt.Sprintf(AddGinIndexSQL, tableName, tableName)
+	sql = strings.ReplaceAll(sql, "\n", " ")
+	return tx.Exec(o.Ctx, sql)
+}
+
 const InsertRowSQL = `
 INSERT INTO %s(doctype, row_id, kind, blob)
 VALUES ($1, $2, '%s', $3)

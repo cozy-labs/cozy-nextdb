@@ -106,7 +106,11 @@ func (o *Operator) CreateDatabase(databaseName string) error {
 		return err
 	})
 	_ = o.ReadWriteTx(func(tx pgx.Tx) error {
-		_, err = o.ExecCreateTable(tx, table)
+		_, err := o.ExecCreateTable(tx, table)
+		if err != nil {
+			return err
+		}
+		_, err = o.ExecAddGinIndex(tx, table)
 		return err
 	})
 	return o.ReadWriteTx(insertRows)
