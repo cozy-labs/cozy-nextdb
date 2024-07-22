@@ -144,6 +144,7 @@ func Handler(s *Server) *echo.Echo {
 	e.DELETE("/:db", s.DeleteDatabase)
 
 	e.PUT("/:db/_design/:ddoc", s.CreateDesignDoc)
+	e.GET("/:db/_design/:ddoc/_view/:view", s.GetView)
 
 	e.GET("/:db/_all_docs", s.GetAllDocs)
 	e.GET("/:db/_changes", s.GetChanges)
@@ -329,7 +330,7 @@ func (s *Server) DeleteDatabase(c echo.Context) error {
 }
 
 // CreateDesignDoc is the handler for PUT /:db/_design/:ddoc. It creates a
-// design document in the given database (ie a view or a mango index).
+// view (its design document) in the given database.
 func (s *Server) CreateDesignDoc(c echo.Context) error {
 	op := newOperator(s, c)
 	docID := "_design/" + c.Param("ddoc")
@@ -355,6 +356,31 @@ func (s *Server) CreateDesignDoc(c echo.Context) error {
 		return c.JSON(http.StatusConflict, map[string]any{
 			"error":  err.Error(),
 			"reason": "Document update conflict.",
+		})
+	default:
+		op.Logger.With(slog.Any("error", err.Error())).Error("internal_server_error")
+		return c.JSON(http.StatusInternalServerError, map[string]any{
+			"error":  "internal_server_error",
+			"reason": err.Error(),
+		})
+	}
+}
+
+// GetView is the handler for GET /:db/_design/:ddoc/_view/:view. It executes
+// the specified view function from the specified design document.
+func (s *Server) GetView(c echo.Context) error {
+	op := newOperator(s, c)
+	// TODO params like reduce, startkey, endkey
+
+	docID := "_design/" + c.Param("ddoc")
+	result, err := op.GetView(c.Param("db"), docID, c.Param("view"))
+	switch {
+	case err == nil:
+		return c.JSON(http.StatusOK, result)
+	case errors.Is(err, core.ErrNotFound):
+		return c.JSON(http.StatusNotFound, map[string]any{
+			"error":  err.Error(),
+			"reason": "missing",
 		})
 	default:
 		op.Logger.With(slog.Any("error", err.Error())).Error("internal_server_error")
