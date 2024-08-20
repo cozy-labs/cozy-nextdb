@@ -2,7 +2,7 @@
 
 ## Dependencies
 
-You will need Go 1.22, git, make and curl.
+You will need Go 1.23, git, make and curl.
 
 ```sh
 $ git clone git@github.com:cozy-labs/cozy-nextdb.git

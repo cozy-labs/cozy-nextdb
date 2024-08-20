@@ -1,6 +1,6 @@
 module github.com/cozy-labs/cozy-nextdb
 
-go 1.22.0
+go 1.23.0
 
 require (
 	github.com/dop251/goja v0.0.0-20240707163329-b1681fb2a2f5
