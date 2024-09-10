@@ -40,11 +40,11 @@ work:
 
 ## lint: enforce a consistent code style and detect code smells
 lint: scripts/golangci-lint
-> @scripts/golangci-lint run -E gofmt -E unconvert -E misspell -E whitespace -E exportloopref -E bidichk -E gocritic -E bodyclose
+> @scripts/golangci-lint run -E gofmt -E unconvert -E misspell -E whitespace -E bidichk -E gocritic -E bodyclose
 .PHONY: lint
 
 scripts/golangci-lint: Makefile
-> @curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./scripts v1.60.1
+> @curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./scripts v1.61.0
 
 ## cli: build the CLI documentation and shell completions
 cli: install
